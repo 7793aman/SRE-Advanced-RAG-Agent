@@ -2,8 +2,8 @@
 
 A Kubernetes IT-Operations copilot: one FastAPI service that answers an SRE's
 natural-language questions by routing them to documentation retrieval (RAG),
-operational-data queries (Text2SQL), or both (Hybrid) — behind a 9-layer security
-stack and a 5-tier Redis cache, orchestrated as a LangGraph state machine.
+operational-data queries (Text2SQL), or both (Hybrid) — behind a layered security
+pipeline and a multi-tier cache, orchestrated as a LangGraph state machine.
 
 ## Glossary
 
@@ -34,21 +34,21 @@ The per-request `QueryRequest` toggles — `search_mode`, `enable_rerank`, `enab
 off. Also the eval harness's "profiles".
 _Avoid_: "options", "settings" (that's `app/config.py`).
 
-**Module**
-One self-contained advanced technique, matching one commit in the reference repo:
-Native RAG, Hybrid Search, Reranking, HyDE, CRAG, Self-RAG, Text2SQL, Caching, Security.
-The build adds one module at a time on top of a working baseline.
-_Avoid_: "phase", "lesson" (the reference uses "commit" / "module").
+**Module / technique**
+One self-contained advanced-RAG capability: Native RAG, Hybrid Search, Reranking, HyDE,
+CRAG, Self-RAG, Text2SQL, Caching, Security. Each fixes a specific failure mode of naïve
+RAG. The build adds one at a time on top of a working baseline.
+_Avoid_: "phase", "lesson".
 
-**The 9 layers (L1–L9)**
+**The security layers (L1–L9)**
 The fixed-order defensive pipeline every `/query` request traverses: L1 Pydantic+regex,
 L4a JWT, L4b rate limit, L6 token budget, L5 input restructuring, L2 llm-guard scan,
 L7a input moderation+PII, L3 hardened system prompt, L8 spotlighting, L7b output
-moderation+PII, L9 output schema validation. Numbered by the course's threat model,
-not by execution order.
-_Avoid_: renumbering them; the out-of-order numbering is intentional and matches the report.
+moderation+PII, L9 output schema validation. Numbered by threat model, not by execution
+order — the out-of-order numbering is intentional and matches `projectReport.pdf`.
+_Avoid_: renumbering them.
 
 **Reference**
-The cloned upstream repo at `_reference/` (gitignored, read-only). The source of truth
-for "what does the finished code do". Not to be copied wholesale — each ticket rebuilds
-its slice.
+The working implementation of a similar system at `_reference/` (gitignored, read-only).
+An implementation aid the agent may consult while writing code. Not the spec — `spec.md`
+is the spec.
