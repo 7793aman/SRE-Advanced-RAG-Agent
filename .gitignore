@@ -1,0 +1,28 @@
+# Input corpus — 802MB of third-party PDFs, not source. Keep local, not in git.
+noisy_data 2/
+data/raw/
+
+# Reference implementation — cloned for reading only
+_reference/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Vector store / build artifacts
+*.sqlite3
+chroma/
+.chroma/
+storage/
+index/
+
+# OS
+.DS_Store
