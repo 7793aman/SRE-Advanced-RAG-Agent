@@ -1,9 +1,9 @@
-# Input corpus — 802MB of third-party PDFs, not source. Keep local, not in git.
-noisy_data 2/
-data/raw/
-
-# Reference implementation — cloned for reading only
+# Local reference material — not part of this repo
 _reference/
+projectReport.pdf
+
+# Input corpus — 802 MB of third-party PDFs, kept local
+noisy_data 2/
 
 # Python
 .venv/
