@@ -29,7 +29,7 @@ behind a layered security pipeline and a multi-tier cache, orchestrated with Lan
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues in `7793aman/EnterpriseRAG`, driven via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues in `7793aman/SRE-RAG-Agent`, driven via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
