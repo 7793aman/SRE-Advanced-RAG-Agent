@@ -47,8 +47,3 @@ L7a input moderation+PII, L3 hardened system prompt, L8 spotlighting, L7b output
 moderation+PII, L9 output schema validation. Numbered by threat model, not by execution
 order — the out-of-order numbering is intentional and matches `projectReport.pdf`.
 _Avoid_: renumbering them.
-
-**Reference**
-The working implementation of a similar system at `_reference/` (gitignored, read-only).
-An implementation aid the agent may consult while writing code. Not the spec — `spec.md`
-is the spec.
