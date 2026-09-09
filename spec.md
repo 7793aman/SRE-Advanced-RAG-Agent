@@ -217,6 +217,17 @@ artefact.
     each eval profile.
 64. As a developer, I want lint (ruff), type-check (mypy), and unit tests to pass in CI.
 
+### Observability
+
+65. As an operator, I want every `/query` run traced — inputs, the retrieval path, the
+    retrieved chunks, each LLM call with token usage and latency, the feature flags, and
+    the final answer — so that I can inspect and debug a real request instead of guessing.
+66. As an operator, I want tracing to be a no-op when it isn't configured, so that local
+    development and CI need no extra service or credentials.
+67. As a developer, I want eval-harness runs linked to the tracing backend (scores on a
+    dataset, one trace per golden), so that a low Ragas score is one click from the trace
+    that produced it.
+
 ## Implementation Decisions
 
 ### Stack
@@ -242,6 +253,9 @@ artefact.
 - **Document parsing:** a document-conversion library with a hybrid chunker
   (PDF/DOCX/HTML/TXT).
 - **Logging:** loguru (structured JSON in production).
+- **Tracing:** Langfuse (cloud free tier) — `@observe` on the LLM/RAG service entry
+  points plus a callback handler on the LangGraph invoke; disabled and inert when
+  `LANGFUSE_*` is unset.
 - **Tooling:** ruff, mypy, pytest; Ragas for eval.
 
 ### Modules and responsibilities
@@ -326,6 +340,15 @@ separate migration.
 embedding (7 d) · intent (24 h) · sql_gen (24 h) · sql_result (15 m) · rag_answer (1 h,
 key includes flags). Keys are SHA-256 of the normalised input.
 
+### Observability
+
+Langfuse (cloud free tier). A thin tracing wrapper around the LLM and RAG service
+functions (`@observe`) plus a Langfuse callback handler on the graph invoke; the eval
+runner pushes each golden run as a trace and its Ragas scores to a Langfuse dataset.
+`langfuse_public_key` / `langfuse_secret_key` / `langfuse_host` in config with blank
+defaults — unset means tracing is skipped and no code path changes. Trace payloads pass
+through the same L7 PII redaction before leaving the process.
+
 ### Build order
 
 The system is built as a chain of vertical slices, each adding one capability on top of a
@@ -334,9 +357,9 @@ models → auth + rate limiting → operational-DB schema & seeding → embeddin
 store + cache service → **native dense RAG end-to-end via `/query`** → hybrid search →
 reranking → HyDE → CRAG + web fallback → Self-RAG → LangGraph state machine + intent
 router → Text2SQL + human-in-the-loop approval → full multi-tier caching + dedup storage →
-the 9 security layers wired in fixed order → Ragas eval harness → Streamlit UI →
-docker-compose end-to-end + docs. `/to-tickets` will turn this into the actual tickets
-with blocking edges.
+the 9 security layers wired in fixed order → Ragas eval harness → Langfuse tracing +
+eval linkage → Streamlit UI → docker-compose end-to-end + docs. `/to-tickets` will turn
+this into the actual tickets with blocking edges.
 
 ### Known clean-ups (decide per ticket)
 
@@ -354,7 +377,8 @@ with blocking edges.
 - AWS deployment (CloudFormation / ECS / EFS / ALB / OIDC) — no infrastructure design or
   code behind it.
 - The PDF's "optional add-ons" (multi-LLM, multi-modal, GraphRAG, agentic RAG,
-  Langfuse, streaming SSE, multilingual).
+  streaming SSE, multilingual). Langfuse tracing was moved in scope — see
+  "Observability" above and issue #37.
 
 ## Testing Decisions
 
