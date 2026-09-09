@@ -1,8 +1,9 @@
-# Local reference material — not part of this repo
-_reference/
+# Local design doc — not committed
 projectReport.pdf
 
-# Input corpus — 802 MB of third-party PDFs, kept local
+# Noise corpus — staged locally, file bodies never committed
+seed/docs/noisy_data/*
+!seed/docs/noisy_data/.gitkeep
 noisy_data 2/
 
 # Python

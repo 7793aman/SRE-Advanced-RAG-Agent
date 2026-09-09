@@ -9,7 +9,7 @@ behind a layered security pipeline and a multi-tier cache, orchestrated with Lan
 - **The owner is learning this codebase, not just shipping it.** Every session works
   exactly one ticket, then teaches it. After implementing:
   1. Post a comment on the ticket: what was built, key decisions, any deviation from
-     `spec.md` or the reference.
+     `spec.md`.
   2. In the chat, walk the owner through the implementation — the design of each new
      module, why it's shaped that way, how the pieces connect — and answer follow-up
      questions.
@@ -20,10 +20,10 @@ behind a layered security pipeline and a multi-tier cache, orchestrated with Lan
   the seams named in `spec.md`'s Testing Decisions, run `/code-review`, commit.
 - `spec.md` is the source of truth for intended behaviour. Tickets deliver its user
   stories; each ticket's `Spec:` line points at the sections that govern it.
-- `_reference/` holds a working implementation of a similar system, kept locally as an
-  implementation aid the agent may consult. It is gitignored and is not the spec.
-- `projectReport.pdf` is the original design brief this system is based on.
-- The noise corpus (802 MB) lives at `noisy_data 2/` in the repo root (gitignored).
+- `projectReport.pdf` (gitignored) is the architecture sketch for the system; `spec.md` is
+  the behavioural source of truth and wins wherever they differ.
+- The noise corpus (~820 files) is staged at `seed/docs/noisy_data/` — the file bodies are
+  gitignored and never committed.
 
 ## Agent skills
 

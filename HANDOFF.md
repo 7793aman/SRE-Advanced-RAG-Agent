@@ -11,15 +11,15 @@ conversation assumed.
   that answers an SRE's plain-English questions from documentation (RAG), an operational
   SQL database (Text2SQL), or both, orchestrated as a LangGraph state machine, behind a
   9-layer security pipeline and a 5-tier cache. Plus a Ragas eval harness and a Streamlit UI.
-- **How:** it's a **learning rebuild**. There is a working reference implementation at
-  `_reference/` (gitignored). The owner learns the codebase by having an agent implement
-  one ticket at a time and then **explain it**.
+- **How:** built one ticket at a time. Each session implements one ticket, adds tests, then
+  walks the owner through the design before the issue is closed — so the owner learns the
+  codebase, not just ships it.
 - **State:** planning is done. `spec.md` is written. 18 build tickets exist as GitHub issues
-  **#18–#35** on `github.com/7793aman/EnterpriseRAG`. **No application code exists yet.**
+  **#18–#35**. **No application code exists yet.**
 - **Next action:** implement issue **#19** (project skeleton). Start a fresh `claude` session
   in `/Users/aman/dev/RAG` and run `/implement 19` — or just "build issue #19".
 - **Not this session's job:** cloud agents (the build needs local data + local Docker),
-  wayfinder (no design fog — the reference defines everything).
+  wayfinder (no design fog — `spec.md` and the issues are the plan).
 
 ---
 
@@ -91,10 +91,8 @@ text into vectors. Ingestion is a plain script (`scripts/seed_db.py`), run once.
 | `HANDOFF.md` | this file | ✅ |
 | `docs/agents/` | issue-tracker / triage / domain config (from `/setup-matt-pocock-skills`) | ✅ |
 | `seed/docs/true_data/` | 47 Kubernetes signal docs, pre-staged | ✅ |
-| `seed/docs/noisy_data/` | empty (`.gitkeep`) — the noise corpus is wired in at ticket #21 | ✅ |
-| `_reference/` | **working reference implementation** — read-only aid, consult freely | ❌ gitignored |
-| `projectReport.pdf` | the original 16-page design brief this is based on | ❌ gitignored |
-| `noisy_data 2/` | the 802 MB / 820-file noise corpus, at the repo root | ❌ gitignored |
+| `seed/docs/noisy_data/` | ~820-file / ~800 MB noise corpus, staged locally | ✅ `.gitkeep` only — bodies gitignored |
+| `projectReport.pdf` | the 16-page architecture sketch for the system | ❌ gitignored |
 
 There is **no `app/` yet** — that's what the tickets build.
 
@@ -128,12 +126,11 @@ The owner is **learning the codebase**, not just shipping it. Explanation is par
 - `CONTEXT.md` glossary written.
 - 18 build tickets created as GitHub issues **#18–#35** with blocking edges.
 - 47 `true_data` signal docs staged in `seed/docs/true_data/`.
-- Reference cloned to `_reference/`.
 
 **Not done:**
 - **No application code.** `app/`, `eval/`, `scripts/`, migrations — none exist yet.
 - API keys not obtained, `.env` not created, Docker not brought up (that's ticket **#18**).
-- 3 owner decisions still open (see §10).
+- 3 owner decisions still open (see §9).
 
 **Quirk:** GitHub issues start at **#18**. A first attempt at issue creation hit a shell
 bug (zsh array indexing) and produced 17 mis-paired issues; they were deleted, so #1–#17
@@ -146,7 +143,7 @@ are burned numbers. Cosmetic only.
 Each issue body has: a short description, a **Scope** list, a **Done when** checklist, a
 **Blocked by** line, and a **Spec:** pointer into `spec.md`.
 
-| # | Title | Blocked by | Builds (reference files) |
+| # | Title | Blocked by | Builds |
 |---|---|---|---|
 | 18 | Setup: API keys & local infrastructure | — | `.env`, `docker compose up` (no code) |
 | 19 | Project skeleton, config & models | — | `pyproject.toml`, `Makefile`, `Dockerfile`, `docker-compose.yml`, `.env.example`, `app/config.py`, `app/models.py`, `app/main.py`, `scripts/serve.py` |
@@ -178,7 +175,7 @@ Frontier at handoff time: **#18 and #19** (nothing blocks them).
 - **User Stories** — ~64 numbered stories; each ticket's `Spec:` line says which it delivers
 - **Implementation Decisions** — stack, module responsibilities, API contracts, the fixed
   security-layer order, the cache tiers/TTLs, the SQL schema note, build order, "known
-  reference clean-ups", "out of scope"
+  clean-ups", "out of scope"
 - **Testing Decisions** — the **seams**:
   - primary: the RAG service's traced entry point (`run_rag_with_trace` / the no-cache
     variant) — retrieval quality testable without HTTP or the graph; the eval harness
@@ -189,32 +186,7 @@ Frontier at handoff time: **#18 and #19** (nothing blocks them).
 
 ---
 
-## 7. The reference implementation — how to use it
-
-`_reference/` is a **complete, working** implementation of a very similar system. Treat it
-as the answer key: when implementing a ticket, read the relevant files closely, then write
-the equivalent here. It is **not** copied wholesale into commits — each ticket rebuilds its
-slice, and the owner reviews it.
-
-The reference is built as **10 clean feature commits** — one technique each. To see a
-module in isolation:
-
-```
-git -C _reference log --oneline        # list the 10 commits
-git -C _reference show <hash>          # see exactly what one module added
-```
-
-Commit → module map:
-`1d9e264` native RAG · `2b68f19` hybrid · `57af24d` rerank · `1d4f8a0` HyDE ·
-`bf3b02e` CRAG · `3a4cd05` Self-RAG · `d27a1d0` Text2SQL+LangGraph ·
-`27171e5`(+`99dfa5c`,`b3761be`) caching · `3d7854a` security · `ee550c6` PROJECT_REPORT.
-
-Note the reference has **no `tests/` directory** — zero tests upstream. This project adds
-its own (see §10).
-
----
-
-## 8. Stack & why each piece
+## 7. Stack & why each piece
 
 | Layer | Tech | Why |
 |---|---|---|
@@ -237,72 +209,71 @@ its own (see §10).
 
 ---
 
-## 9. Known discrepancies: PDF vs reference code — **read before implementing**
+## 8. Known discrepancies to handle — **read before implementing**
 
-The reference code is authoritative where it disagrees with `projectReport.pdf`:
+Where the build should diverge from `projectReport.pdf` (the PDF is an architecture
+sketch, not a spec — trust the decisions below):
 
 1. **Sparse search is scikit-learn TF-IDF built in-process** by scrolling Qdrant — the PDF
    says "FastEmbed / BM25" and implies sparse vectors live in Qdrant. They don't.
 2. **Reranker default is `ms-marco-MiniLM-L-6-v2`**, not "BGE" as the PDF says.
 3. **`vanna` is a pinned dependency but never imported.** `sql_service.py` uses raw
    `psycopg2` + a plain LLM prompt, borrowing only `settings.vanna_model` as a model-name
-   string. (See §10 — keep or drop.)
+   string. (See §9 — keep or drop.)
 4. **The SQL schema in `003_seed_k8s_ops.sql` differs from the report's prose** — e.g.
    `environment` not `provider`, columns `alertname` / `rca_summary`, no `node_count`.
    Trust the migration file.
-5. **`seed/docs/README.md` in the reference is stale** — it describes an e-commerce
-   refund/warranty corpus. The real corpus is Kubernetes docs. Rewrite it (ticket #35).
+5. **The seed-docs README describes an e-commerce refund/warranty corpus** — the real
+   corpus is Kubernetes docs. Rewrite `seed/docs/README.md` (ticket #35).
 6. **`eval/seed_questions.yaml` golden source names are short** (`pods.html`) but ingested
    `source` values are the full slug (`concepts__workloads__pods.html`). Reconcile in
    ticket #33 (rename goldens / substring-match / re-slug — pick one).
-7. **`router_service.py` has a leftover `_DOCUMENT_HINTS` list** of diffusion-LLM terms
+7. **`router_service.py` carries a leftover `_DOCUMENT_HINTS` list** of diffusion-LLM terms
    from an unrelated corpus. Drop it (ticket #29).
-8. **`app/storage/__init__.py` contains the `LocalStorage` class**; `local_storage.py` is
+8. **`app/storage/__init__.py` holds the `LocalStorage` class**; `local_storage.py` is
    empty. Put the class where it belongs (ticket #31).
-9. **`app/models.py` `search_mode` defaults to `"dense"`** though some README examples say
-   `hybrid`. Keep `dense` as the schema default; eval/UI profiles set it explicitly.
-10. **`/documents/upload` is documented in the README/PDF but not implemented** in the
-    reference. See §10 and §11.
-11. **`scripts/data_pipeline/` is referenced** (`make seed-data`, some pyproject dev deps)
-    **but does not exist** in the reference. The `true_data` docs and `003_*.sql` are
+9. **`app/models.py` `search_mode` defaults to `"dense"`** though some docs say `hybrid`.
+   Keep `dense` as the schema default; eval/UI profiles set it explicitly.
+10. **`/documents/upload` is documented in the PDF but not built.** See §9 and §10.
+11. **`scripts/data_pipeline/` is named by `make seed-data`** and some pyproject dev deps
+    **but is not part of the build.** The `true_data` docs and `003_*.sql` are
     pre-generated committed artifacts. `make seed-data` will be a dead target — drop it or
     make it a no-op (ticket #35).
-12. **No AWS deploy exists.** The PDF lists ECS/EFS/ALB/OIDC as a learning outcome and the
-    README mentions `infra/cloudformation.yaml` + `docs/DEPLOYMENT_GUIDE.md` — none of it is
-    in the reference. Marked out of scope in `spec.md`.
+12. **No AWS deploy.** The PDF lists ECS/EFS/ALB/OIDC as a learning outcome and mentions
+    `infra/cloudformation.yaml` + `docs/DEPLOYMENT_GUIDE.md` — none of it exists here.
+    Marked out of scope in `spec.md`.
 
 ---
 
-## 10. Open decisions the owner must make
+## 9. Open decisions the owner must make
 
 Ask the owner before the tickets they affect:
 
 | Decision | Affects | Recommendation |
 |---|---|---|
-| **Build `/documents/upload`?** The endpoint is documented but not in the reference. spec.md has a user story for it. | #22 (or a micro-ticket) | **Build it** — ~30 lines on top of `document_processor` + `embedding_service` + `vector_store` + `doc_cache_service`. Completes the story. |
-| **Keep the added test suite?** The reference has zero tests; spec.md + every ticket's acceptance criteria require unit tests. | every ticket, ~+20–30% time | **Keep** — the owner is learning; tests are how each slice gets verified. |
-| **Keep `vanna` as a dependency?** Pinned but unused. | #19 (installs a heavy dep) | Either is fine — keep for pyproject fidelity, or drop it and the 3 `VANNA_*` settings. |
-| **Skip AWS deployment?** A stated PDF outcome with nothing upstream to copy. | scope | **Skip** — no reference material exists. Revisit as a separate effort if wanted. |
+| **Build `/documents/upload`?** Documented in the PDF, no ticket covers it; spec.md has a user story for it. | #22 (or a micro-ticket) | **Build it** — ~30 lines on top of `document_processor` + `embedding_service` + `vector_store` + `doc_cache_service`. Completes the story. |
+| **Keep the test suite?** spec.md + every ticket's acceptance criteria require unit tests. | every ticket, ~+20–30% time | **Keep** — the owner is learning; tests are how each slice gets verified. |
+| **Keep `vanna` as a dependency?** Pinned but unused. | #19 (installs a heavy dep) | Either is fine — keep it, or drop it and the 3 `VANNA_*` settings. |
+| **Skip AWS deployment?** A stated PDF outcome with no design or code behind it. | scope | **Skip.** Revisit as a separate effort if wanted. |
 
 ---
 
-## 11. Verification findings (coverage check done at handoff)
+## 10. Verification findings (coverage check done at handoff)
 
-Every PDF module and every one of the 42 `app/` files + eval + scripts + seed maps to a
-ticket. Gaps found:
+Every PDF module maps to a ticket. Gaps found:
 
-- **Real gap:** `/documents/upload` — not in reference, not in a ticket (decision above).
-- **Unavoidable gaps** (nothing upstream to copy): AWS deploy, `scripts/data_pipeline/`,
+- **Real gap:** `/documents/upload` — no ticket covers it (decision above).
+- **Out of scope, no design behind them:** AWS deploy, `scripts/data_pipeline/`,
   `docs/DEPLOYMENT_GUIDE.md`.
-- **Scope addition:** the test suite (reference has none).
+- **Scope addition:** the unit test suite.
 - **Tidy:** add a direct `#18` blocking edge to `#21` (transitively covered via #20, but
   GitHub won't show it). Note the dead `make seed-data` target in #35.
 
 ---
 
-## 12. How to run / build / test
+## 11. How to run / build / test
 
-Nothing runs yet. Once ticket #19 lands, the intended commands (from the reference Makefile):
+Nothing runs yet. Once ticket #19 lands, the intended commands:
 
 ```
 make install        # uv venv + uv sync --extra dev
@@ -320,7 +291,7 @@ Demo users after `make seed`: `agent@demo.local` / `agent123`, `admin@demo.local
 
 ---
 
-## 13. Session hygiene
+## 12. Session hygiene
 
 - **Always start the session in `/Users/aman/dev/RAG`** (`cd` there, then `claude`). Slash
   commands (`/implement`, `/code-review`) act on the launch directory. A session started
@@ -328,31 +299,14 @@ Demo users after `make seed`: `agent@demo.local` / `agent123`, `admin@demo.local
 - **One fresh session per ticket.** Do not carry a single conversation across many tickets
   and lean on compaction — the durable memory is: the GitHub issues (+ their closing
   comments), `spec.md`, `CONTEXT.md`, `HANDOFF.md`, and git history.
-- **Do not use cloud agents** for the build — they can't see `noisy_data 2/`, `_reference/`,
-  or local Docker. This is local work.
-- **Do not** run `/wayfinder` — there is no design fog; the reference defines everything.
-  spec.md + the issues already are the plan.
+- **Do not use cloud agents** for the build — they can't see the local corpus or local
+  Docker. This is local work.
+- **Do not** run `/wayfinder` — there is no design fog; `spec.md` + the issues are already
+  the plan.
 
 ---
 
-## 14. How we got here (brief)
-
-The owner bought an agentic-engineering course; "Enterprise RAG" is one project, shipped
-fully implemented. Rather than watch the videos, the plan is to rebuild it ticket-by-ticket
-with an agent implementing and explaining.
-
-Path taken: `/wayfinder` was run first (wrong tool — it's for problems with unknowns; this
-has none). It produced a local-file map + 19 draft tickets, since no tracker was configured
-yet. Those were **deleted** and replaced with a hand-written `spec.md` (richer than
-`/to-spec` would produce fresh, because the whole reference was read in that session).
-Then `/setup-matt-pocock-skills` set GitHub as the tracker, and the 18 issues were created
-directly. So: no `wayfinder:map` issue exists (by design), and issue numbers start at #18.
-
-The standard flow from here is the matt-pocock **`/implement`** per ticket.
-
----
-
-## 15. Concept primer (for explaining to the owner)
+## 13. Concept primer (for explaining to the owner)
 
 - **RAG** = Retrieval-Augmented Generation: retrieve relevant text → put it in the prompt →
   LLM generates a grounded answer. The "documentation path" here.

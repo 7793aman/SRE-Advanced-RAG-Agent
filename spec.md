@@ -338,23 +338,22 @@ the 9 security layers wired in fixed order → Ragas eval harness → Streamlit 
 docker-compose end-to-end + docs. `/to-tickets` will turn this into the actual tickets
 with blocking edges.
 
-### Known reference clean-ups (decide per ticket)
+### Known clean-ups (decide per ticket)
 
-- The eval goldens reference short source filenames (`pods.html`) while ingestion records
-  the full slugged name (`concepts__workloads__pods.html`) — reconcile in the eval slice.
-- The reference router carries a hard-coded hint list from an unrelated corpus — drop it.
-- The reference misplaces the local-storage class into a package `__init__` — put it where
-  it belongs.
-- The reference's `seed/docs/README.md` describes an unrelated e-commerce corpus — rewrite
-  for the Kubernetes corpus.
+- The eval goldens use short source filenames (`pods.html`) while ingestion records the
+  full slugged name (`concepts__workloads__pods.html`) — reconcile in the eval slice.
+- The intent router carries a hard-coded hint list from an unrelated corpus — drop it.
+- The local-storage class sits in a package `__init__` — move it where it belongs.
+- `seed/docs/README.md` describes an unrelated e-commerce corpus — rewrite it for the
+  Kubernetes corpus.
 - Default `search_mode` is `dense` in the schema though some docs imply `hybrid` — keep
   `dense` as the schema default; the eval/UI profiles set it explicitly.
 
 ### Out of scope
 
-- AWS deployment (CloudFormation / ECS / EFS / ALB / OIDC) — no infrastructure code exists
-  to base it on.
-- The report's "optional add-ons" (multi-LLM, multi-modal, GraphRAG, agentic RAG,
+- AWS deployment (CloudFormation / ECS / EFS / ALB / OIDC) — no infrastructure design or
+  code behind it.
+- The PDF's "optional add-ons" (multi-LLM, multi-modal, GraphRAG, agentic RAG,
   Langfuse, streaming SSE, multilingual).
 
 ## Testing Decisions

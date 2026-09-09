@@ -13,9 +13,9 @@ The ~47 real Kubernetes documentation files (`seed/docs/true_data/`) the system 
 _Avoid_: "the docs" (ambiguous with noise), "knowledge base" (that's signal + noise).
 
 **Noise / noisy_data**
-~820 unrelated technical PDFs (`noisy_data 2/` in the repo root). Deliberately 95% of
-the corpus so naïve top-k retrieval drowns — every advanced technique has to earn its
-place by rescuing signal from noise.
+~820 unrelated technical PDFs (`seed/docs/noisy_data/`, gitignored — staged locally,
+never committed). Deliberately 95% of the corpus so naïve top-k retrieval drowns —
+every advanced technique has to earn its place by rescuing signal from noise.
 _Avoid_: "distractors" (use "noise"), "junk".
 
 **Intent**
