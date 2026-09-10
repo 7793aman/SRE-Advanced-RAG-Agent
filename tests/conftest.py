@@ -17,9 +17,19 @@ from fastapi.testclient import TestClient
 from app import db
 from app.config import settings
 from app.main import app
-from app.middleware.rate_limiter import rate_limiter
+from app.middleware.rate_limiter import MemoryBackend, rate_limiter
 
 _MIGRATION = Path(__file__).resolve().parents[1] / "seed" / "migrations" / "001_create_users.sql"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _limiter_uses_memory() -> None:
+    """Pin the shared limiter to an in-process backend for the whole run.
+
+    Without this, a checkout whose `.env` configures Upstash would make the auth
+    HTTP tests hit (and pollute) a live Redis. Tests must not depend on it.
+    """
+    rate_limiter._backend = MemoryBackend()
 
 
 @pytest.fixture(autouse=True)
