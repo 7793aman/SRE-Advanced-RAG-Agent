@@ -1,4 +1,4 @@
-.PHONY: help install sync api serve test lint format typecheck check seed streamlit \
+.PHONY: help install sync api serve test lint format typecheck check migrate seed streamlit \
 	eval eval-baseline eval-all eval-diff
 
 help:
@@ -14,6 +14,7 @@ help:
 	@echo "  make typecheck   — mypy app"
 	@echo "  make check       — lint + typecheck + test"
 	@echo ""
+	@echo "  make migrate     — apply seed/migrations/*.sql to the database"
 	@echo "  make seed        — migrations + demo users + doc ingestion   (ticket #21/#22)"
 	@echo "  make streamlit   — demo UI (:8501)                            (ticket #34)"
 	@echo "  make eval        — Ragas eval: baseline vs all + diff         (ticket #33)"
@@ -45,6 +46,9 @@ typecheck:
 	uv run mypy app
 
 check: lint typecheck test
+
+migrate:
+	uv run python scripts/migrate.py
 
 # --- staged for later tickets -------------------------------------------------
 
