@@ -1,8 +1,9 @@
 """Apply every SQL file in ``seed/migrations/`` in filename order.
 
-Idempotent — each migration uses ``CREATE TABLE IF NOT EXISTS`` and friends, so
-re-running is safe. Ticket #21's ``seed_db.py`` builds the demo users and the
-operational data on top of this.
+Idempotent — re-running lands the same schema. ``001`` uses
+``CREATE TABLE IF NOT EXISTS`` and keeps its data; ``003`` is a data seed that
+DROPs and rebuilds its own tables each run (never touches ``users``).
+``seed_db.py`` runs these migrations plus the demo users, and later the corpus.
 
     make migrate      # or: uv run python scripts/migrate.py
 """
