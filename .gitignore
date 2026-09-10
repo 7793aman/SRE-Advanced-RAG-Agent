@@ -11,7 +11,25 @@ noisy_data 2/
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
 .ipynb_checkpoints/
+
+# uv / toolchain
+.python-version
+
+# Test / lint / type caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Eval output
+eval/results/
 
 # Secrets
 .env

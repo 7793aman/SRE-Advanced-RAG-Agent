@@ -1,0 +1,25 @@
+# Keep the build context small and reproducible.
+.git
+.venv
+.python-version
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Never bake the noise corpus into the image (staged locally, ingested via `make seed`).
+seed/docs/noisy_data
+
+# Local-only
+.env
+.env.*
+!.env.example
+_reference
+learning
+projectReport.pdf
+eval/results
+notebooks
+tests
