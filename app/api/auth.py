@@ -34,6 +34,9 @@ def _client_ip(request: Request) -> str:
     # proxy in docker-compose), so honouring a client-supplied X-Forwarded-For
     # here would let anyone spread their attempts across unlimited buckets and
     # walk straight past the per-IP limit.
+    #
+    # `request.client` is always set when served over TCP (uvicorn); the
+    # "unknown" fallback only applies to non-TCP transports we don't deploy on.
     return request.client.host if request.client else "unknown"
 
 
@@ -60,17 +63,20 @@ def register(body: RegisterRequest, request: Request) -> TokenResponse:
                 (body.username, password_hash),
             )
             row = cur.fetchone()
+            if row is None:  # `INSERT ... RETURNING` without a conflict always yields a row
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Registration failed",
+                )
+            # Mint the token *before* the `with` block commits, so a failure here
+            # rolls the insert back instead of leaving an account with no token
+            # that can never be re-registered.
+            token = create_access_token(row.id, row.username, row.is_admin)
     except psycopg2.errors.UniqueViolation:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Username already registered",
         ) from None
-    if row is None:  # `INSERT ... RETURNING` without a conflict always yields a row
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Registration failed",
-        )
-    token = create_access_token(row.id, row.username, row.is_admin)
     return TokenResponse(token=token)
 
 

@@ -70,6 +70,18 @@ def test_is_allowed_user_uses_settings_defaults(limiter: RateLimiter) -> None:
     assert limiter.is_allowed_user("user-2") is True
 
 
+def test_memory_backend_drops_keys_that_age_out(clock: list[float]) -> None:
+    backend = MemoryBackend()
+    limiter = RateLimiter(backend=backend, clock=lambda: clock[0])
+    limiter._allow("k", limit=5, window_seconds=60)
+    assert "k" in backend._sets
+
+    clock[0] += 61  # the only hit ages out on the next touch
+    limiter._allow("k", limit=5, window_seconds=60)
+    # the pre-add prune emptied the set and removed the key; then this hit re-added it
+    assert backend.zcard("k") == 1
+
+
 def test_reset_clears_memory_state(limiter: RateLimiter) -> None:
     for _ in range(5):
         limiter._allow("k", limit=5, window_seconds=60)

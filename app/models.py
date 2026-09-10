@@ -51,6 +51,13 @@ def validate_free_text(value: str, noun: str = "Input") -> str:
 _BCRYPT_MAX_BYTES = 72  # bcrypt hashes only the first 72 bytes of the password
 
 
+def _normalize_username(v: str) -> str:
+    # Trim and lower-case so `Agent@demo.local` and `agent@demo.local` are the
+    # same account. Both request models normalise identically, so a login always
+    # matches what registration stored.
+    return v.strip().lower()
+
+
 def _check_password_bytes(v: str) -> str:
     # Cap on the *byte* length bcrypt actually sees, so a long multi-byte password
     # is rejected rather than silently truncated to a shared 72-byte prefix.
@@ -66,7 +73,7 @@ class RegisterRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def _clean_username(cls, v: str) -> str:
-        v = v.strip()
+        v = _normalize_username(v)
         if not 3 <= len(v) <= 255:
             raise ValueError("Username must be 3–255 characters after trimming whitespace")
         return v
@@ -84,7 +91,7 @@ class LoginRequest(BaseModel):
     @field_validator("username")
     @classmethod
     def _strip_username(cls, v: str) -> str:
-        return v.strip()
+        return _normalize_username(v)
 
     @field_validator("password")
     @classmethod

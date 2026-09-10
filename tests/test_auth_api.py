@@ -26,6 +26,14 @@ def test_duplicate_registration_is_409(client: TestClient, clean_users: None) ->
     assert resp.status_code == 409
 
 
+def test_registration_and_login_are_case_insensitive(client: TestClient, clean_users: None) -> None:
+    assert _register(client, username="SRE@Demo.Local", password="hunter2!!").status_code == 201
+    # same identity, different case → duplicate
+    assert _register(client, username="sre@demo.local", password="hunter2!!").status_code == 409
+    resp = client.post("/auth/login", json={"username": "Sre@Demo.Local", "password": "hunter2!!"})
+    assert resp.status_code == 200
+
+
 def test_login_with_correct_password_returns_jwt(client: TestClient, clean_users: None) -> None:
     _register(client, password="hunter2!!")
     resp = client.post("/auth/login", json={"username": "sre@demo.local", "password": "hunter2!!"})

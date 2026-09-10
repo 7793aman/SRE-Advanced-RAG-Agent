@@ -57,7 +57,11 @@ class MemoryBackend:
         scores = self._sets.get(key)
         if scores is None:
             return
-        self._sets[key] = [s for s in scores if not (min_score <= s <= max_score)]
+        kept = [s for s in scores if not (min_score <= s <= max_score)]
+        if kept:
+            self._sets[key] = kept
+        else:
+            del self._sets[key]  # don't keep a dict entry per IP that's gone quiet
 
     def zcard(self, key: str) -> int:
         return len(self._sets.get(key, ()))
@@ -107,23 +111,28 @@ class RateLimiter:
     ) -> None:
         self._backend = backend if backend is not None else _default_backend()
         self._clock = clock
-        # Serialises the prune → count → add sequence so concurrent requests in
-        # this process (sync endpoints run in a threadpool) can't all observe a
-        # sub-limit count and overshoot. Cross-process races on a shared Redis
-        # remain possible — acceptable for this project's single-replica scope.
+        # Guards the prune → count → add sequence against the in-process threadpool
+        # race (sync endpoints run on many threads). Only meaningful for
+        # MemoryBackend: with Redis each op is a network round-trip and holding a
+        # process-wide lock across all three would serialise the whole service,
+        # while cross-process races are already accepted as out of scope.
         self._lock = threading.Lock()
 
     def _allow(self, key: str, limit: int, window_seconds: int) -> bool:
         """Core sliding-window check. Returns True if this hit is within budget."""
+        if isinstance(self._backend, MemoryBackend):
+            with self._lock:
+                return self._sliding_window(key, limit, window_seconds)
+        return self._sliding_window(key, limit, window_seconds)
+
+    def _sliding_window(self, key: str, limit: int, window_seconds: int) -> bool:
         now = self._clock()
-        window_start = now - window_seconds
-        with self._lock:
-            self._backend.zremrangebyscore(key, 0, window_start)
-            if self._backend.zcard(key) >= limit:
-                return False
-            self._backend.zadd(key, {f"{now:.6f}:{uuid4().hex}": now})
-            self._backend.expire(key, window_seconds)
-            return True
+        self._backend.zremrangebyscore(key, 0, now - window_seconds)
+        if self._backend.zcard(key) >= limit:
+            return False
+        self._backend.zadd(key, {f"{now:.6f}:{uuid4().hex}": now})
+        self._backend.expire(key, window_seconds)
+        return True
 
     def is_allowed_ip(self, ip: str, action: str, limit: int, window_seconds: int) -> bool:
         """Per-IP budget for one auth `action` (`"login"`, `"register"`)."""
@@ -142,8 +151,9 @@ class RateLimiter:
 
     def reset(self) -> None:
         """Drop all in-process state. No-op unless the backend is `MemoryBackend`."""
-        if isinstance(self._backend, MemoryBackend):
-            self._backend.clear()
+        with self._lock:
+            if isinstance(self._backend, MemoryBackend):
+                self._backend.clear()
 
 
 rate_limiter = RateLimiter()
