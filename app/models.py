@@ -45,6 +45,57 @@ def validate_free_text(value: str, noun: str = "Input") -> str:
     return value
 
 
+# --- API: /auth ------------------------------------------------------------------
+
+
+_BCRYPT_MAX_BYTES = 72  # bcrypt hashes only the first 72 bytes of the password
+
+
+def _check_password_bytes(v: str) -> str:
+    # Cap on the *byte* length bcrypt actually sees, so a long multi-byte password
+    # is rejected rather than silently truncated to a shared 72-byte prefix.
+    if len(v.encode("utf-8")) > _BCRYPT_MAX_BYTES:
+        raise ValueError(f"Password must be at most {_BCRYPT_MAX_BYTES} bytes")
+    return v
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str = Field(..., min_length=8)
+
+    @field_validator("username")
+    @classmethod
+    def _clean_username(cls, v: str) -> str:
+        v = v.strip()
+        if not 3 <= len(v) <= 255:
+            raise ValueError("Username must be 3–255 characters after trimming whitespace")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def _password_bytes(cls, v: str) -> str:
+        return _check_password_bytes(v)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str = Field(..., min_length=1)
+
+    @field_validator("username")
+    @classmethod
+    def _strip_username(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("password")
+    @classmethod
+    def _password_bytes(cls, v: str) -> str:
+        return _check_password_bytes(v)
+
+
+class TokenResponse(BaseModel):
+    token: str
+
+
 # --- API: /query -----------------------------------------------------------------
 
 
