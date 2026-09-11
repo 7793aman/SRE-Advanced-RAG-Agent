@@ -163,6 +163,7 @@ class RetrievedChunk(BaseModel):
     text: str
     source: str
     score: float = 0.0
+    page_number: int | None = None
 
 
 class CRAGEvaluation(BaseModel):

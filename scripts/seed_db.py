@@ -153,11 +153,10 @@ def ingest_corpus(selection: CorpusSelection) -> None:
     Imports the ingestion services lazily so `--no-ingest` runs (and this
     module's import) don't need ticket #22's dependencies.
     """
+    from app.models import RetrievedChunk
     from app.services.document_processor import DocumentProcessor
     from app.services.embedding_service import embed_texts
     from app.services.vector_store import upsert_chunks
-
-    from app.models import RetrievedChunk
 
     processor = DocumentProcessor()
     ordered = [(p, "signal") for p in selection.signal]
@@ -176,7 +175,10 @@ def ingest_corpus(selection: CorpusSelection) -> None:
                 logger.warning("[{}/{}] {} {} → 0 chunks", idx, selection.total, label, path.name)
                 failed += 1
                 continue
-            chunks = [RetrievedChunk(text=m["text"], source=m["source"]) for m in meta]
+            chunks = [
+                RetrievedChunk(text=m["text"], source=m["source"], page_number=m.get("page_number"))
+                for m in meta
+            ]
             upsert_chunks(chunks, embed_texts([c.text for c in chunks]))
             ingested += 1
             chunk_count += len(chunks)
