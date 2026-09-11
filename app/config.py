@@ -13,8 +13,8 @@ class Settings(BaseSettings):
 
     # === LLM & embeddings ===
     openai_api_key: str = ""
-    llm_model_answer: str = "gpt-4o"
-    llm_model_grader: str = "gpt-4o-mini"
+    llm_model_answer: str = "gpt-5.6-terra"
+    llm_model_grader: str = "gpt-5.6-sol"
     embedding_model: str = "text-embedding-3-small"
 
     # === Vector store ===

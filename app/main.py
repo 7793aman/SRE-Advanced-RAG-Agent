@@ -7,7 +7,9 @@ module-level `app` is what `uvicorn app.main:app` and `scripts/serve.py` serve.
 
 from fastapi import FastAPI
 
+from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.query import router as query_router
 
 
 def create_app() -> FastAPI:
@@ -21,6 +23,8 @@ def create_app() -> FastAPI:
     #   #20  app.api.auth
     #   #23  app.api.query, app.api.admin
     app.include_router(auth_router)
+    app.include_router(query_router)
+    app.include_router(admin_router)
 
     return app
 
