@@ -114,7 +114,7 @@ RCA_TEMPLATES = [
     "A noisy neighbour saturated CPU on the shared node; applied resource quotas.",
 ]
 
-ALERTNAMES = [
+ALERT_NAMES = [
     ("KubePodCrashLooping", "availability"),
     ("KubeDeploymentReplicasMismatch", "availability"),
     ("KubePodNotReady", "availability"),
@@ -154,10 +154,12 @@ def _q(value: str) -> str:
 
 
 def _ts(dt: datetime) -> str:
+    """Render a datetime as a UTC ``TIMESTAMPTZ`` literal."""
     return "'" + dt.strftime("%Y-%m-%d %H:%M:%S") + "+00'"
 
 
 def _lit(value: object) -> str:
+    """Render one Python value as its SQL literal (``bool`` before ``int``)."""
     if value is None:
         return "NULL"
     if isinstance(value, bool):
@@ -172,7 +174,11 @@ def _lit(value: object) -> str:
 
 
 def _insert_block(table: str, columns: list[str], rows: list[tuple[object, ...]]) -> list[str]:
-    """Emit one or more multi-row INSERT statements for ``rows``."""
+    """Emit multi-row INSERTs for ``rows``, each idempotent via ``ON CONFLICT``.
+
+    Rows carry explicit primary keys, so re-applying the migration onto an
+    already-seeded database is a no-op rather than a duplicate-key error.
+    """
     if not rows:
         return []
     out: list[str] = []
@@ -180,7 +186,7 @@ def _insert_block(table: str, columns: list[str], rows: list[tuple[object, ...]]
     for start in range(0, len(rows), _ROWS_PER_INSERT):
         chunk = rows[start : start + _ROWS_PER_INSERT]
         values = ",\n".join("  (" + ", ".join(_lit(v) for v in row) + ")" for row in chunk)
-        out.append(f"INSERT INTO {table} ({collist}) VALUES\n{values};")
+        out.append(f"INSERT INTO {table} ({collist}) VALUES\n{values}\nON CONFLICT DO NOTHING;")
     return out
 
 
@@ -266,9 +272,10 @@ def build_dataset(rng: random.Random) -> dict[str, list[tuple[object, ...]]]:
     incidents: list[tuple[object, ...]] = []
     incident_ids: list[int] = []
     incident_started: dict[int, datetime] = {}
+    incident_resolved: dict[int, bool] = {}
     for inc_id in range(1, N_INCIDENTS + 1):
         cid = rng.choice(cluster_ids)
-        started = WORLD_NOW - timedelta(days=rng.randint(0, 365), seconds=rng.randint(0, 86_400))
+        started = WORLD_NOW - timedelta(days=rng.randint(0, 90), seconds=rng.randint(0, 86_400))
         severity = rng.choice(SEVERITIES)
         # higher severity → longer tail of resolution time
         ceiling = {"P1": 600, "P2": 400, "P3": 240, "P4": 180, "P5": 120}[severity]
@@ -285,20 +292,23 @@ def build_dataset(rng: random.Random) -> dict[str, list[tuple[object, ...]]]:
         incidents.append((inc_id, severity, cid, started, resolved_at, mttr, rca))
         incident_ids.append(inc_id)
         incident_started[inc_id] = started
+        incident_resolved[inc_id] = resolved_flag
 
     # --- alerts -----------------------------------------------------------
     alerts: list[tuple[object, ...]] = []
     for alert_id in range(1, N_ALERTS + 1):
-        fired = WORLD_NOW - timedelta(days=rng.randint(0, 90), seconds=rng.randint(0, 86_400))
         severity = rng.choice(SEVERITIES)
         source_pod = rng.choice(pod_ids)
-        alertname, category = rng.choice(ALERTNAMES)
-        # ~35% of alerts are tied to a declared incident
+        alertname, category = rng.choice(ALERT_NAMES)
+        # ~35% of alerts are tied to a declared incident — those fire around its
+        # start; the rest fire at any point in the 90-day window.
         alert_incident_id: int | None = None
         if rng.random() < 0.35:
             alert_incident_id = rng.choice(incident_ids)
-            alert_resolved = incidents[alert_incident_id - 1][4] is not None
+            fired = incident_started[alert_incident_id] + timedelta(minutes=rng.randint(-15, 120))
+            alert_resolved = incident_resolved[alert_incident_id]
         else:
+            fired = WORLD_NOW - timedelta(days=rng.randint(0, 90), seconds=rng.randint(0, 86_400))
             alert_resolved = rng.random() > 0.25
         alerts.append(
             (
@@ -343,21 +353,14 @@ _SCHEMA = """\
 -- GENERATED FILE — do not edit by hand. Regenerate with:
 --     uv run python scripts/gen_ops_seed.py
 --
--- Unlike 001_create_users.sql (schema only, CREATE TABLE IF NOT EXISTS), this
--- migration DROPs and rebuilds its tables every run: it is a data seed, and
--- re-running `make migrate` is meant to reset the synthetic world to a known
--- state. The users table is a separate migration and is never touched here.
+-- Idempotent like 001_create_users.sql: CREATE TABLE IF NOT EXISTS, and every
+-- row is INSERT ... ON CONFLICT DO NOTHING against an explicit primary key, so
+-- re-running `make migrate` is a no-op on an already-seeded database. To reseed
+-- from scratch after changing the generator, DROP the seven tables first. The
+-- users table is a separate migration and is never touched here.
 -- =============================================================================
 
-DROP TABLE IF EXISTS oncall_logs CASCADE;
-DROP TABLE IF EXISTS alerts      CASCADE;
-DROP TABLE IF EXISTS pods        CASCADE;
-DROP TABLE IF EXISTS incidents   CASCADE;
-DROP TABLE IF EXISTS deployments CASCADE;
-DROP TABLE IF EXISTS nodes       CASCADE;
-DROP TABLE IF EXISTS clusters    CASCADE;
-
-CREATE TABLE clusters (
+CREATE TABLE IF NOT EXISTS clusters (
     cluster_id  INTEGER PRIMARY KEY,
     name        VARCHAR(128) UNIQUE NOT NULL,
     region      VARCHAR(32)  NOT NULL,
@@ -366,7 +369,7 @@ CREATE TABLE clusters (
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE TABLE nodes (
+CREATE TABLE IF NOT EXISTS nodes (
     node_id    INTEGER PRIMARY KEY,
     cluster_id INTEGER NOT NULL REFERENCES clusters(cluster_id),
     node_type  VARCHAR(24) NOT NULL,
@@ -376,7 +379,7 @@ CREATE TABLE nodes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE deployments (
+CREATE TABLE IF NOT EXISTS deployments (
     deployment_id INTEGER PRIMARY KEY,
     name          VARCHAR(128) NOT NULL,
     namespace     VARCHAR(64)  NOT NULL,
@@ -387,7 +390,7 @@ CREATE TABLE deployments (
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE TABLE pods (
+CREATE TABLE IF NOT EXISTS pods (
     pod_id        INTEGER PRIMARY KEY,
     name          VARCHAR(160) NOT NULL,
     namespace     VARCHAR(64)  NOT NULL,
@@ -398,7 +401,7 @@ CREATE TABLE pods (
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE TABLE incidents (
+CREATE TABLE IF NOT EXISTS incidents (
     incident_id  INTEGER PRIMARY KEY,
     severity     VARCHAR(4)  NOT NULL,
     cluster_id   INTEGER     NOT NULL REFERENCES clusters(cluster_id),
@@ -408,7 +411,7 @@ CREATE TABLE incidents (
     rca_summary  TEXT
 );
 
-CREATE TABLE alerts (
+CREATE TABLE IF NOT EXISTS alerts (
     alert_id      INTEGER PRIMARY KEY,
     fired_at      TIMESTAMPTZ  NOT NULL,
     severity      VARCHAR(4)   NOT NULL,
@@ -419,7 +422,7 @@ CREATE TABLE alerts (
     resolved      BOOLEAN      NOT NULL DEFAULT FALSE
 );
 
-CREATE TABLE oncall_logs (
+CREATE TABLE IF NOT EXISTS oncall_logs (
     log_id             INTEGER PRIMARY KEY,
     engineer           VARCHAR(64)  NOT NULL,
     paged_at           TIMESTAMPTZ  NOT NULL,
@@ -428,18 +431,18 @@ CREATE TABLE oncall_logs (
     escalated          BOOLEAN      NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX idx_nodes_cluster       ON nodes(cluster_id);
-CREATE INDEX idx_deployments_cluster ON deployments(cluster_id);
-CREATE INDEX idx_pods_deployment     ON pods(deployment_id);
-CREATE INDEX idx_pods_node           ON pods(node_id);
-CREATE INDEX idx_pods_status         ON pods(status);
-CREATE INDEX idx_incidents_cluster   ON incidents(cluster_id);
-CREATE INDEX idx_incidents_severity  ON incidents(severity);
-CREATE INDEX idx_alerts_fired_at     ON alerts(fired_at);
-CREATE INDEX idx_alerts_severity     ON alerts(severity);
-CREATE INDEX idx_alerts_category     ON alerts(category);
-CREATE INDEX idx_alerts_incident     ON alerts(incident_id);
-CREATE INDEX idx_oncall_incident     ON oncall_logs(incident_id);
+CREATE INDEX IF NOT EXISTS idx_nodes_cluster       ON nodes(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_cluster ON deployments(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_pods_deployment     ON pods(deployment_id);
+CREATE INDEX IF NOT EXISTS idx_pods_node           ON pods(node_id);
+CREATE INDEX IF NOT EXISTS idx_pods_status         ON pods(status);
+CREATE INDEX IF NOT EXISTS idx_incidents_cluster   ON incidents(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_severity  ON incidents(severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_fired_at     ON alerts(fired_at);
+CREATE INDEX IF NOT EXISTS idx_alerts_severity     ON alerts(severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_category     ON alerts(category);
+CREATE INDEX IF NOT EXISTS idx_alerts_incident     ON alerts(incident_id);
+CREATE INDEX IF NOT EXISTS idx_oncall_incident     ON oncall_logs(incident_id);
 """
 
 _COLUMNS: dict[str, list[str]] = {
@@ -515,14 +518,14 @@ def build_sql() -> str:
     return "\n".join(parts) + "\n"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
         action="store_true",
         help="exit non-zero if the committed .sql file differs from a fresh render",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     sql = build_sql()
     if args.check:

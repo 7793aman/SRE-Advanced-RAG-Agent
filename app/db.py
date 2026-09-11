@@ -40,3 +40,18 @@ def run_sql_file(path: str | Path) -> None:
     sql = Path(path).read_text(encoding="utf-8")
     with connection() as conn, conn.cursor() as cur:
         cur.execute(sql)
+
+
+_MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "seed" / "migrations"
+
+
+def run_migrations(migrations_dir: str | Path = _MIGRATIONS_DIR) -> list[str]:
+    """Apply every `.sql` file in `migrations_dir` in filename order.
+
+    Returns the filenames applied. Idempotent — the migrations use
+    `CREATE TABLE IF NOT EXISTS` and `INSERT ... ON CONFLICT DO NOTHING`.
+    """
+    paths = sorted(Path(migrations_dir).glob("*.sql"))
+    for path in paths:
+        run_sql_file(path)
+    return [p.name for p in paths]

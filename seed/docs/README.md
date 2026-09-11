@@ -10,11 +10,12 @@ retrieval technique has to earn its place by rescuing signal from noise.
 
 ## Corpus wiring
 
-The seeder (`scripts/seed_db.py`) reads `noisy_data/` **directly** — no symlink,
-no config indirection. The noise bodies are staged there locally and excluded
-from git via `.gitignore` (`seed/docs/noisy_data/*`, keeping `.gitkeep`). A repo
-root `noisy_data 2/` staging folder, if present, is also gitignored; copy or move
-its contents into `seed/docs/noisy_data/` before seeding.
+The seeder always reads noise from `seed/docs/noisy_data/`. If that directory
+is empty, `scripts.seed_db.stage_noise_corpus()` runs automatically before
+ingestion and **symlinks** (never copies — the corpus is ~800MB) every file in
+from the first repo-root staging folder it finds: `noisy_data 2/`, then
+`noisy_data/`. Both are gitignored, so a fresh drop of the corpus at the repo
+root is picked up with no manual step.
 
 ## Selecting the corpus
 

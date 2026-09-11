@@ -52,6 +52,15 @@ def db_ready() -> None:
         pytest.skip(f"Postgres not reachable: {exc}")
 
 
+@pytest.fixture(scope="session")
+def migrations_applied() -> None:
+    """All of `seed/migrations/` applied, or skip when Postgres is unreachable."""
+    try:
+        db.run_migrations()
+    except psycopg2.OperationalError as exc:
+        pytest.skip(f"Postgres not reachable: {exc}")
+
+
 @pytest.fixture
 def clean_users(db_ready: None) -> Iterator[None]:
     with db.connection() as conn, conn.cursor() as cur:

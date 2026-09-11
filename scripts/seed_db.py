@@ -10,9 +10,9 @@ The signal corpus (`seed/docs/true_data/`, 47 files) is always ingested in full.
 The noise corpus (`seed/docs/noisy_data/`) is sampled to a configurable size with
 a fixed seed, so the same `--noise-sample N` always picks the same N files.
 
-Corpus wiring: the noise corpus is staged directly at `seed/docs/noisy_data/`
-(gitignored bodies, see `seed/docs/README.md`). No symlink — the seeder reads
-that path as-is.
+Corpus wiring: the seeder reads noise from `seed/docs/noisy_data/`. If that's
+empty, `stage_noise_corpus()` symlinks files in from a root-level staging
+folder (`noisy_data 2/`, or `noisy_data/`) — see `seed/docs/README.md`.
 
 Doc ingestion depends on the embedding + vector-store services (ticket #22); until
 those land, run with `--no-ingest`.
@@ -30,11 +30,10 @@ from typing import Literal
 
 from loguru import logger
 
-from app.db import connection, run_sql_file
+from app.db import connection, run_migrations
 from app.middleware.auth import hash_password
 
 _ROOT = Path(__file__).resolve().parents[1]
-MIGRATIONS_DIR = _ROOT / "seed" / "migrations"
 DOCS_DIR = _ROOT / "seed" / "docs"
 
 SIGNAL_SUBDIR = "true_data"
@@ -45,6 +44,11 @@ SUPPORTED_SUFFIXES = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
 
 # Fixed seed for noise sampling — stable selection across runs and machines.
 NOISE_SAMPLE_SEED = 42
+
+# Root-level staging folders to pull the noise corpus from, in preference order,
+# when `seed/docs/noisy_data/` is empty. `noisy_data 2/` is what a fresh drop of
+# the corpus tends to land as (a second copy alongside a stale `noisy_data/`).
+_NOISE_STAGING_CANDIDATES = ("noisy_data 2", "noisy_data")
 
 # username, plaintext password, is_admin
 DEMO_USERS: tuple[tuple[str, str, bool], ...] = (
@@ -76,6 +80,32 @@ def _list_docs(directory: Path) -> list[Path]:
     )
 
 
+def stage_noise_corpus(root: Path = _ROOT) -> int:
+    """Wire a root-level noise staging folder into `seed/docs/noisy_data/`.
+
+    A no-op when `seed/docs/noisy_data/` already has files. Otherwise, for the
+    first existing candidate in `_NOISE_STAGING_CANDIDATES`, symlinks each of
+    its files in — a symlink, not a copy, so the ~800MB corpus body is never
+    duplicated on disk. Returns the number of files newly linked.
+    """
+    target = root / "seed" / "docs" / NOISE_SUBDIR
+    if _list_docs(target):
+        return 0
+    target.mkdir(parents=True, exist_ok=True)
+    for name in _NOISE_STAGING_CANDIDATES:
+        source = root / name
+        if not source.is_dir() or source.resolve() == target.resolve():
+            continue
+        files = _list_docs(source)
+        if not files:
+            continue
+        for f in files:
+            (target / f.name).symlink_to(f.resolve())
+        logger.info("staged {} noise files from {} -> {}", len(files), source, target)
+        return len(files)
+    return 0
+
+
 def select_corpus(noise_sample: int | Literal["all"], docs_dir: Path = DOCS_DIR) -> CorpusSelection:
     """Pick the corpus for a seed run.
 
@@ -98,18 +128,6 @@ def select_corpus(noise_sample: int | Literal["all"], docs_dir: Path = DOCS_DIR)
             noise = sorted(random.Random(NOISE_SAMPLE_SEED).sample(noise_pool, n))
 
     return CorpusSelection(signal=signal, noise=noise)
-
-
-def run_migrations(migrations_dir: Path = MIGRATIONS_DIR) -> list[str]:
-    """Apply every `.sql` file in filename order. Returns the names applied."""
-    paths = sorted(migrations_dir.glob("*.sql"))
-    if not paths:
-        logger.warning("no migrations found in {}", migrations_dir)
-        return []
-    for path in paths:
-        logger.info("applying migration {}", path.name)
-        run_sql_file(path)
-    return [p.name for p in paths]
 
 
 def seed_users(users: Iterable[tuple[str, str, bool]] = DEMO_USERS) -> None:
@@ -172,9 +190,14 @@ def _parse_noise_sample(raw: str) -> int | Literal["all"]:
     if raw == "all":
         return "all"
     try:
-        return int(raw)
+        value = int(raw)
     except ValueError:
-        raise SystemExit(f"--noise-sample must be an integer or 'all', got {raw!r}") from None
+        raise SystemExit(
+            f"--noise-sample must be a non-negative integer or 'all', got {raw!r}"
+        ) from None
+    if value < 0:
+        raise SystemExit(f"--noise-sample must be a non-negative integer or 'all', got {raw!r}")
+    return value
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -204,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("--no-ingest set; skipping document ingestion")
         return 0
 
+    stage_noise_corpus()
     selection = select_corpus(noise_sample)
     if selection.total == 0:
         logger.warning("no documents found under {} — nothing to ingest", DOCS_DIR)

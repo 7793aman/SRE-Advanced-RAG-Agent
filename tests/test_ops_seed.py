@@ -8,15 +8,9 @@ Two layers:
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import psycopg2
-import pytest
-
 from app import db
 from scripts import gen_ops_seed
 
-_MIGRATIONS = Path(__file__).resolve().parents[1] / "seed" / "migrations"
 _TABLES = ["clusters", "nodes", "deployments", "pods", "incidents", "alerts", "oncall_logs"]
 
 
@@ -37,7 +31,7 @@ def test_committed_sql_is_not_stale() -> None:
 def test_sql_defines_all_seven_tables() -> None:
     sql = gen_ops_seed.OUT_PATH.read_text(encoding="utf-8")
     for table in _TABLES:
-        assert f"CREATE TABLE {table} (" in sql
+        assert f"CREATE TABLE IF NOT EXISTS {table} (" in sql
 
 
 def test_sql_has_roughly_10k_rows() -> None:
@@ -46,16 +40,7 @@ def test_sql_has_roughly_10k_rows() -> None:
     assert 9_000 <= row_lines <= 11_000
 
 
-# --- applied against Postgres ---------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def ops_db() -> None:
-    try:
-        for path in sorted(_MIGRATIONS.glob("*.sql")):
-            db.run_sql_file(path)
-    except psycopg2.OperationalError as exc:
-        pytest.skip(f"Postgres not reachable: {exc}")
+# --- applied against Postgres (uses the shared `migrations_applied` fixture) ---
 
 
 def _scalar(sql: str) -> object:
@@ -64,16 +49,16 @@ def _scalar(sql: str) -> object:
         return cur.fetchone()[0]
 
 
-def test_every_table_is_populated(ops_db: None) -> None:
+def test_every_table_is_populated(migrations_applied: None) -> None:
     for table in _TABLES:
         assert _scalar(f"SELECT count(*) FROM {table}") > 0
 
 
-def test_incident_count_is_a_real_number(ops_db: None) -> None:
+def test_incident_count_is_a_real_number(migrations_applied: None) -> None:
     assert _scalar("SELECT count(*) FROM incidents") == gen_ops_seed.N_INCIDENTS
 
 
-def test_pods_sit_on_a_node_in_their_deployments_cluster(ops_db: None) -> None:
+def test_pods_sit_on_a_node_in_their_deployments_cluster(migrations_applied: None) -> None:
     orphans = _scalar(
         """
         SELECT count(*)
@@ -86,14 +71,14 @@ def test_pods_sit_on_a_node_in_their_deployments_cluster(ops_db: None) -> None:
     assert orphans == 0
 
 
-def test_resolved_incidents_have_an_mttr(ops_db: None) -> None:
+def test_resolved_incidents_have_an_mttr(migrations_applied: None) -> None:
     bad = _scalar(
         "SELECT count(*) FROM incidents WHERE resolved_at IS NOT NULL AND mttr_minutes IS NULL"
     )
     assert bad == 0
 
 
-def test_demo_query_p1_incidents_by_cluster(ops_db: None) -> None:
+def test_demo_query_p1_incidents_by_cluster(migrations_applied: None) -> None:
     busiest = _scalar(
         """
         SELECT count(*) AS n
@@ -107,7 +92,7 @@ def test_demo_query_p1_incidents_by_cluster(ops_db: None) -> None:
     assert busiest is not None and busiest > 0
 
 
-def test_demo_query_avg_mttr_for_network_alerts(ops_db: None) -> None:
+def test_demo_query_avg_mttr_for_network_alerts(migrations_applied: None) -> None:
     avg = _scalar(
         """
         SELECT avg(i.mttr_minutes)
@@ -119,6 +104,7 @@ def test_demo_query_avg_mttr_for_network_alerts(ops_db: None) -> None:
     assert avg is not None and float(avg) > 0
 
 
-def test_migration_is_rerunnable(ops_db: None) -> None:
-    db.run_sql_file(_MIGRATIONS / "003_seed_k8s_ops.sql")
-    assert _scalar("SELECT count(*) FROM incidents") == gen_ops_seed.N_INCIDENTS
+def test_migration_is_rerunnable(migrations_applied: None) -> None:
+    before = _scalar("SELECT count(*) FROM incidents")
+    db.run_migrations()  # ON CONFLICT DO NOTHING → no duplicates, no error
+    assert _scalar("SELECT count(*) FROM incidents") == before == gen_ops_seed.N_INCIDENTS
