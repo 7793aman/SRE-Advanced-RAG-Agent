@@ -1,5 +1,6 @@
 """Generate ``seed/migrations/003_seed_k8s_ops.sql`` — the operational schema plus
-a fixed-seed synthetic dataset (~10k rows across 7 tables).
+a fixed-seed synthetic dataset (~187k rows across 7 tables, matching the scale of
+the reference project's k8s-ops dataset).
 
 The SQL file is a committed build artefact so ``make migrate`` alone gives a
 working database. It is *generated*, never hand-edited: change the shape here and
@@ -24,14 +25,15 @@ SEED = 42
 
 OUT_PATH = Path(__file__).resolve().parents[1] / "seed" / "migrations" / "003_seed_k8s_ops.sql"
 
-# Row counts — tuned to ~10k total and to make the demo queries meaningful.
-N_CLUSTERS = 15
-N_NODES = 160
-N_DEPLOYMENTS = 320
-N_PODS = 2_000
-N_INCIDENTS = 1_000
-N_ALERTS = 5_000
-N_ONCALL_LOGS = 1_500
+# Row counts — matches the reference project's k8s-ops dataset scale (~187k rows
+# total), by owner's decision, rather than the ticket's original "~10k" figure.
+N_CLUSTERS = 50
+N_NODES = 5_000
+N_DEPLOYMENTS = 10_000
+N_PODS = 50_000
+N_INCIDENTS = 2_000
+N_ALERTS = 100_000
+N_ONCALL_LOGS = 20_000
 
 # "now" for the synthetic world — fixed so generated timestamps never drift.
 WORLD_NOW = datetime(2026, 9, 1, tzinfo=UTC)

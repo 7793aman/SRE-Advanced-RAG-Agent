@@ -34,10 +34,10 @@ def test_sql_defines_all_seven_tables() -> None:
         assert f"CREATE TABLE IF NOT EXISTS {table} (" in sql
 
 
-def test_sql_has_roughly_10k_rows() -> None:
+def test_sql_has_roughly_187k_rows() -> None:
     sql = gen_ops_seed.OUT_PATH.read_text(encoding="utf-8")
     row_lines = sum(1 for line in sql.splitlines() if line.startswith("  ("))
-    assert 9_000 <= row_lines <= 11_000
+    assert 180_000 <= row_lines <= 195_000
 
 
 # --- applied against Postgres (uses the shared `migrations_applied` fixture) ---
