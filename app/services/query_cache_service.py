@@ -194,6 +194,21 @@ class QueryCacheService:
 
     # --- admin ---------------------------------------------------------------
 
+    def ping(self) -> bool:
+        """A real round-trip against the active backend, for `/admin/health`.
+
+        Bypasses `_get`/`_set` (and their tier stats) — this is a liveness
+        probe, not a cached lookup, so it shouldn't show up as a hit or a
+        miss in `stats()`. Always `True` for the in-process fallback (story
+        #45: it's never actually down); a real `False` only when Redis is
+        configured and unreachable.
+        """
+        try:
+            self._backend.set("__healthcheck__", "1", ttl_seconds=5)
+            return self._backend.get("__healthcheck__") == "1"
+        except Exception:  # noqa: BLE001 — a health probe reports down, never raises
+            return False
+
     def stats(self) -> dict[str, dict[str, float | int]]:
         """Per-tier hits/misses/sets and hit rate, for `/admin/cache/stats`."""
         with self._lock:

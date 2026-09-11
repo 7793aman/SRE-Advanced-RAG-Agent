@@ -142,6 +142,36 @@ def test_clear_evicts_every_tier_and_resets_stats(cache: QueryCacheService) -> N
 
     assert cache.get_embedding("a", _MODEL) is None
     assert cache.get_intent("q") is None
+
+
+# --- ping() ------------------------------------------------------------------
+
+
+def test_ping_is_true_for_a_working_backend(cache: QueryCacheService) -> None:
+    assert cache.ping() is True
+
+
+def test_ping_is_false_when_the_backend_raises() -> None:
+    class _BrokenBackend:
+        def get(self, key: str) -> str | None:
+            raise ConnectionError("Redis is down")
+
+        def set(self, key: str, value: str, ttl_seconds: int) -> None:
+            raise ConnectionError("Redis is down")
+
+        def delete(self, keys: list[str]) -> None:
+            raise ConnectionError("Redis is down")
+
+    cache = QueryCacheService(backend=_BrokenBackend())
+
+    assert cache.ping() is False
+
+
+def test_ping_does_not_affect_any_tiers_stats(cache: QueryCacheService) -> None:
+    cache.ping()
+
+    for tier_stats in cache.stats().values():
+        assert tier_stats == {"hits": 0, "misses": 0, "sets": 0, "hit_rate": 0.0}
     assert cache.get_rag_answer("q") is None
     assert cache.get_sql_generation("q") is None
     assert cache.get_sql_result("SELECT 1") is None
