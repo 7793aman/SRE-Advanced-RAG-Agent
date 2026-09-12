@@ -112,17 +112,17 @@ def test_sources_are_deduplicated_in_first_seen_order(
     assert response.sources == ["pods.html", "deployments.html"]
 
 
-def test_confidence_is_the_top_chunks_score(
+def test_retrieval_score_is_the_top_chunks_score(
     fresh_cache, fake_search, fake_embed, fake_generate
 ) -> None:
     from app.services.rag_service import run_rag_with_trace
 
     response, _ = run_rag_with_trace("What is a Pod?", _FLAGS)
 
-    assert response.confidence == pytest.approx(0.9)
+    assert response.retrieval_score == pytest.approx(0.9)
 
 
-def test_no_retrieved_chunks_gives_zero_confidence_and_no_sources(
+def test_no_retrieved_chunks_gives_zero_retrieval_score_and_no_sources(
     fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.services.rag_service import run_rag_with_trace
@@ -131,7 +131,7 @@ def test_no_retrieved_chunks_gives_zero_confidence_and_no_sources(
 
     response, chunks = run_rag_with_trace("What is a Pod?", _FLAGS)
 
-    assert response.confidence == 0.0
+    assert response.retrieval_score == 0.0
     assert response.sources == []
     assert chunks == []
 

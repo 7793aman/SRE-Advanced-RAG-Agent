@@ -27,7 +27,7 @@ def fake_run_rag(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
         return ChatResponse(
             answer="A Pod is the smallest deployable unit. [pods.html]",
             sources=["pods.html"],
-            confidence=0.9,
+            retrieval_score=0.9,
             metadata=ResponseMetadata(route="rag"),
         )
 
@@ -64,7 +64,7 @@ def test_query_with_a_valid_token_returns_the_rag_answer(
     body = resp.json()
     assert body["answer"] == "A Pod is the smallest deployable unit. [pods.html]"
     assert body["sources"] == ["pods.html"]
-    assert body["confidence"] == 0.9
+    assert body["retrieval_score"] == 0.9
 
 
 def test_query_passes_the_question_and_flags_through_to_the_rag_service(

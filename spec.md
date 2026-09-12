@@ -297,7 +297,7 @@ artefact.
 
 - `POST /auth/register` → `{token}`; `POST /auth/login` → `{token}`. Both per-IP rate
   limited. `409` on duplicate, `401` on bad credentials.
-- `POST /query` (bearer JWT) → a chat response: `answer`, `sources[]`, `confidence`,
+- `POST /query` (bearer JWT) → a chat response: `answer`, `sources[]`, `retrieval_score`,
   optional `pending_sql {sql, query_id, explanation}`, `cache_hit`, and a `metadata` block
   (route, retrieved chunk previews, reflection telemetry). Body carries the six feature
   flags. When the graph interrupts for SQL approval, the response carries `pending_sql`
