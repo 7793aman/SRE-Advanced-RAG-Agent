@@ -102,3 +102,62 @@ def test_upsert_round_trips_page_number(qdrant_collection: str) -> None:
 
     results = search(_unit_vector(1), top_k=1)
     assert results[0].page_number is None
+
+
+def test_fuse_rrf_orders_by_combined_rank() -> None:
+    """Hand-calculated with k=60: crash (1/62 + 1/61 = 0.0325) beats rollout
+    (1/61 = 0.0164, dense-only) beats service (1/62 = 0.0161, sparse-only) —
+    consistently ranking in both lists beats being #1 in only one."""
+    from app.services.vector_store import fuse_rrf
+
+    crash = RetrievedChunk(text="crash text", source="crash.html")
+    rollout = RetrievedChunk(text="rollout text", source="rollout.html")
+    service = RetrievedChunk(text="service text", source="service.html")
+
+    dense_results = [rollout, crash]
+    sparse_results = [crash, service]
+
+    fused = fuse_rrf([dense_results, sparse_results], k=60)
+
+    assert [chunk.source for chunk in fused] == ["crash.html", "rollout.html", "service.html"]
+    assert fused[0].score == pytest.approx(1 / 62 + 1 / 61)
+    assert fused[1].score == pytest.approx(1 / 61)
+    assert fused[2].score == pytest.approx(1 / 62)
+
+
+def test_sparse_index_on_empty_corpus_does_not_crash(qdrant_collection: str) -> None:
+    from app.services.vector_store import build_sparse_index, ensure_collection, sparse_search
+
+    ensure_collection()
+
+    index = build_sparse_index()
+    assert index.matrix is None
+    assert index.chunks == []
+
+    assert sparse_search("CrashLoopBackOff") == []
+
+
+def test_sparse_search_finds_exact_token_dense_search_misses(qdrant_collection: str) -> None:
+    """Ticket #24's acceptance case: an exact-token query should retrieve the
+    right doc via sparse search even when dense search (driven by embedding
+    similarity, not word overlap) would surface a different, wrong doc."""
+    from app.services.vector_store import search, sparse_search, upsert_chunks
+
+    target = RetrievedChunk(
+        text="Pod stuck in CrashLoopBackOff due to imagePullPolicy misconfiguration",
+        source="target.html",
+    )
+    unrelated = RetrievedChunk(
+        text="deployment rolling update strategy overview", source="unrelated.html"
+    )
+    upsert_chunks([target, unrelated], [_unit_vector(0), _unit_vector(1)])
+
+    # Dense search follows the embedding, not the words — a query embedding
+    # closest to "unrelated" surfaces the wrong doc regardless of query text.
+    dense_results = search(_unit_vector(1), top_k=1)
+    assert dense_results[0].source == "unrelated.html"
+
+    # Sparse search follows the exact word "imagePullPolicy" and correctly
+    # finds the target doc that dense missed.
+    sparse_results = sparse_search("imagePullPolicy", top_k=1)
+    assert sparse_results[0].source == "target.html"
