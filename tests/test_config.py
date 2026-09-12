@@ -20,8 +20,8 @@ def test_settings_singleton_importable() -> None:
 
 
 def test_model_defaults(defaults: Settings) -> None:
-    assert defaults.llm_model_answer == "gpt-5.6-terra"
-    assert defaults.llm_model_grader == "gpt-5.6-sol"
+    assert defaults.llm_model_answer == "gpt-5.4-mini"
+    assert defaults.llm_model_grader == "gpt-5.5"
     assert defaults.embedding_model == "text-embedding-3-small"
 
 

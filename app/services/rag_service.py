@@ -40,7 +40,7 @@ def _build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
     )
 
 
-def _confidence(chunks: list[RetrievedChunk]) -> float:
+def _retrieval_score(chunks: list[RetrievedChunk]) -> float:
     if not chunks:
         return 0.0
     return max(0.0, min(1.0, chunks[0].score))
@@ -69,7 +69,7 @@ def run_rag_with_trace(
     response = ChatResponse(
         answer=llm_response.text,
         sources=_sources(chunks),
-        confidence=_confidence(chunks),
+        retrieval_score=_retrieval_score(chunks),
         cache_hit=False,
         metadata=ResponseMetadata(
             route="rag",

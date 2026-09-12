@@ -119,3 +119,32 @@ def test_generate_text_accepts_a_model_override(fake_client: _FakeOpenAIClient) 
     generate_text("hi", model="gpt-4o-mini")
 
     assert fake_client.chat.completions.calls[0]["model"] == "gpt-4o-mini"
+
+
+def test_generate_text_omits_temperature_by_default(fake_client: _FakeOpenAIClient) -> None:
+    # Some models (e.g. gpt-5.6-terra) reject any temperature other than
+    # their own default with a 400 — omitting the key entirely when the
+    # caller hasn't asked for a specific value avoids that everywhere.
+    from app.services.llm_service import generate_text
+
+    generate_text("hi")
+
+    assert "temperature" not in fake_client.chat.completions.calls[0]
+
+
+def test_generate_text_sends_temperature_only_when_explicitly_given(
+    fake_client: _FakeOpenAIClient,
+) -> None:
+    from app.services.llm_service import generate_text
+
+    generate_text("hi", temperature=0.2)
+
+    assert fake_client.chat.completions.calls[0]["temperature"] == 0.2
+
+
+def test_generate_json_omits_temperature_by_default(fake_client: _FakeOpenAIClient) -> None:
+    from app.services.llm_service import generate_json
+
+    generate_json("Classify this.")
+
+    assert "temperature" not in fake_client.chat.completions.calls[0]
