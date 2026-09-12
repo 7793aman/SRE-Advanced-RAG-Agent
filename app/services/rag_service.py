@@ -8,12 +8,12 @@ in the way. The eval harness (ticket #33) calls it directly.
 `run_rag` is what `/query` actually calls: a cache read, and on a miss, a
 call to the trace function followed by a cache write.
 
-Only dense search runs today — hybrid/rerank/HyDE/CRAG/self-reflection are
-later tickets, each adding a real behaviour behind its own flag. `flags` is
-threaded through and cached against in full regardless, because story #42
-requires the rag_answer cache key to include every flag: toggling one, even
-one this ticket doesn't act on yet, must not return another profile's stale
-cached answer.
+`_retrieve` branches on `flags["search_mode"]` (dense / sparse / hybrid) —
+rerank/HyDE/CRAG/self-reflection are later tickets, each adding a real
+behaviour behind its own flag. `flags` is threaded through and cached against
+in full regardless, because story #42 requires the rag_answer cache key to
+include every flag: toggling one, even one this ticket doesn't act on yet,
+must not return another profile's stale cached answer.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from app.security.system_prompt import SYSTEM_PROMPT
 from app.services.embedding_service import embed_texts
 from app.services.llm_service import generate_text
 from app.services.query_cache_service import query_cache
-from app.services.vector_store import search
+from app.services.vector_store import hybrid_search, search, sparse_search
 
 _CHUNK_PREVIEW_CHARS = 200
 
@@ -52,6 +52,17 @@ def _sources(chunks: list[RetrievedChunk]) -> list[str]:
     return list(dict.fromkeys(chunk.source for chunk in chunks))
 
 
+def _retrieve(question: str, query_vector: list[float], flags: dict[str, Any]) -> list[RetrievedChunk]:
+    top_k = int(flags.get("top_k", 5))
+    search_mode = flags.get("search_mode", "dense")
+
+    if search_mode == "sparse":
+        return sparse_search(question, top_k=top_k)
+    if search_mode == "hybrid":
+        return hybrid_search(question, query_vector, top_k=top_k)
+    return search(query_vector, top_k=top_k)
+
+
 def run_rag_with_trace(
     question: str, flags: dict[str, Any]
 ) -> tuple[ChatResponse, list[RetrievedChunk]]:
@@ -60,9 +71,8 @@ def run_rag_with_trace(
     No cache read or write — this is the uncached seam tests and the eval
     harness call directly.
     """
-    top_k = int(flags.get("top_k", 5))
     query_vector = embed_texts([question])[0]
-    chunks = search(query_vector, top_k=top_k)
+    chunks = _retrieve(question, query_vector, flags)
 
     llm_response = generate_text(_build_prompt(question, chunks), system_prompt=SYSTEM_PROMPT)
 
