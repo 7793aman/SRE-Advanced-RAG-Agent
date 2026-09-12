@@ -57,11 +57,11 @@ def generate_text(
 ) -> LLMResponse:
     model_name = model or settings.llm_model_answer
     messages = _messages(prompt, system_prompt)
-    # Not every model accepts a custom temperature (some frontier models,
-    # gpt-5.6-terra included, only support their own default and reject any
-    # other value with a 400). Omitting the parameter entirely when the
-    # caller hasn't asked for a specific value sidesteps that everywhere,
-    # rather than hardcoding a per-model allow-list.
+    # Not every model accepts a custom temperature — some (gpt-5.6-terra was
+    # the one that first surfaced this, with a real 400) only support their
+    # own default and reject any other value. Omitting the parameter
+    # entirely when the caller hasn't asked for a specific value sidesteps
+    # that everywhere, rather than hardcoding a per-model allow-list.
     if temperature is None:
         completion = _get_client().chat.completions.create(model=model_name, messages=messages)
     else:
