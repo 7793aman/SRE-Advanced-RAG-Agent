@@ -8,8 +8,18 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pypdf import PdfWriter
 
 from scripts.seed_db import DOCS_DIR, SIGNAL_SUBDIR, select_corpus, stage_noise_corpus
+
+
+def _write_pdf(path: Path, num_pages: int) -> None:
+    """A real, minimal N-page PDF — for testing the page-budget filter."""
+    writer = PdfWriter()
+    for _ in range(num_pages):
+        writer.add_blank_page(width=72, height=72)
+    with path.open("wb") as f:
+        writer.write(f)
 
 
 @pytest.fixture
@@ -71,6 +81,71 @@ def test_noise_sample_draws_from_the_pool(corpus_dir: Path) -> None:
 def test_negative_sample_is_rejected(corpus_dir: Path) -> None:
     with pytest.raises(ValueError, match="noise_sample"):
         select_corpus(-1, docs_dir=corpus_dir)
+
+
+# --- page-budget filter (protects against multi-hundred-page PDFs blowing up
+# --- a docling ingestion run, which analyses every page) --------------------
+
+
+@pytest.fixture
+def page_budget_dir(tmp_path: Path) -> Path:
+    """Signal (irrelevant here) + a noise pool with a mix of short and long PDFs."""
+    signal = tmp_path / "true_data"
+    noise = tmp_path / "noisy_data"
+    signal.mkdir()
+    noise.mkdir()
+    (signal / "doc.txt").write_text("signal")
+    _write_pdf(noise / "short.pdf", num_pages=5)
+    _write_pdf(noise / "medium.pdf", num_pages=50)
+    _write_pdf(noise / "huge.pdf", num_pages=500)
+    (noise / "not_really_a_pdf.pdf").write_text("garbage, not a real PDF")
+    (noise / "notes.md").write_text("non-PDF, never subject to a page count")
+    return tmp_path
+
+
+def test_noise_pool_excludes_pdfs_over_the_page_budget(page_budget_dir: Path) -> None:
+    noise = select_corpus("all", docs_dir=page_budget_dir, max_noise_pages=100).noise
+    names = {p.name for p in noise}
+
+    assert "huge.pdf" not in names
+    assert "short.pdf" in names
+    assert "medium.pdf" in names
+
+
+def test_max_noise_pages_none_disables_the_filter(page_budget_dir: Path) -> None:
+    noise = select_corpus("all", docs_dir=page_budget_dir, max_noise_pages=None).noise
+
+    assert {p.name for p in noise} == {
+        "short.pdf",
+        "medium.pdf",
+        "huge.pdf",
+        "not_really_a_pdf.pdf",
+        "notes.md",
+    }
+
+
+def test_non_pdf_files_are_never_excluded_by_the_page_budget(page_budget_dir: Path) -> None:
+    noise = select_corpus("all", docs_dir=page_budget_dir, max_noise_pages=1).noise
+    names = {p.name for p in noise}
+
+    assert "notes.md" in names
+
+
+def test_an_unreadable_pdf_fails_open_rather_than_being_excluded(page_budget_dir: Path) -> None:
+    # A corrupt/fake PDF whose page count can't be determined must still be
+    # eligible — the filter should never silently drop something it can't
+    # actually inspect.
+    noise = select_corpus("all", docs_dir=page_budget_dir, max_noise_pages=1).noise
+    names = {p.name for p in noise}
+
+    assert "not_really_a_pdf.pdf" in names
+
+
+def test_default_max_noise_pages_still_returns_the_untouched_pool(corpus_dir: Path) -> None:
+    # The existing fixture's fake .pdf files (plain text, not real PDFs) must
+    # still all come through under the *default* budget, unchanged from
+    # before this filter existed.
+    assert len(select_corpus("all", docs_dir=corpus_dir).noise) == 41
 
 
 def test_missing_directories_yield_empty(tmp_path: Path) -> None:

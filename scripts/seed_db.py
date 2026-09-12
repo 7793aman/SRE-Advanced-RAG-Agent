@@ -45,6 +45,15 @@ SUPPORTED_SUFFIXES = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
 # Fixed seed for noise sampling — stable selection across runs and machines.
 NOISE_SAMPLE_SEED = 42
 
+# docling's PDF pipeline runs a full layout-analysis model over every page, on
+# CPU. A handful of multi-hundred-page manuals in the noise corpus (one is
+# 1,324 pages) can each take longer to ingest than the entire rest of a sample
+# combined. Excluding anything over this budget keeps a seed run's duration
+# roughly proportional to the file count you asked for, instead of being at
+# the mercy of which few outliers a random sample happened to draw. `None`
+# disables the filter entirely (e.g. for a deliberate full-corpus run).
+DEFAULT_MAX_NOISE_PAGES: int | None = 100
+
 # Root-level staging folders to pull the noise corpus from, in preference order,
 # when `seed/docs/noisy_data/` is empty. `noisy_data 2/` is what a fresh drop of
 # the corpus tends to land as (a second copy alongside a stale `noisy_data/`).
@@ -106,15 +115,45 @@ def stage_noise_corpus(root: Path = _ROOT) -> int:
     return 0
 
 
-def select_corpus(noise_sample: int | Literal["all"], docs_dir: Path = DOCS_DIR) -> CorpusSelection:
+def _pdf_page_count(path: Path) -> int | None:
+    """Page count via the page tree only (no content parsing) — cheap.
+
+    Returns ``None`` for a non-PDF, or a PDF whose page count can't be read
+    (e.g. corrupt) — callers should treat that as "unknown," not "too long."
+    """
+    if path.suffix.lower() != ".pdf":
+        return None
+    try:
+        from pypdf import PdfReader
+
+        return len(PdfReader(str(path)).pages)
+    except Exception:  # noqa: BLE001 — an unreadable PDF fails open, not closed
+        return None
+
+
+def _within_page_budget(path: Path, max_pages: int | None) -> bool:
+    if max_pages is None:
+        return True
+    pages = _pdf_page_count(path)
+    return pages is None or pages <= max_pages
+
+
+def select_corpus(
+    noise_sample: int | Literal["all"],
+    docs_dir: Path = DOCS_DIR,
+    max_noise_pages: int | None = DEFAULT_MAX_NOISE_PAGES,
+) -> CorpusSelection:
     """Pick the corpus for a seed run.
 
-    Signal is always taken in full. Noise is sampled to ``noise_sample`` files
-    with a fixed seed; ``"all"`` (or a count at/above the pool size) takes every
-    noise file, ``0`` takes none.
+    Signal is always taken in full. The noise pool first drops any PDF over
+    ``max_noise_pages`` (``None`` disables this), then is sampled to
+    ``noise_sample`` files with a fixed seed; ``"all"`` (or a count at/above
+    the pool size) takes every eligible noise file, ``0`` takes none.
     """
     signal = _list_docs(docs_dir / SIGNAL_SUBDIR)
-    noise_pool = _list_docs(docs_dir / NOISE_SUBDIR)
+    noise_pool = [
+        p for p in _list_docs(docs_dir / NOISE_SUBDIR) if _within_page_budget(p, max_noise_pages)
+    ]
 
     if noise_sample == "all":
         noise = noise_pool
@@ -202,6 +241,20 @@ def _parse_noise_sample(raw: str) -> int | Literal["all"]:
     return value
 
 
+def _parse_max_noise_pages(raw: str) -> int | None:
+    if raw == "none":
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"--max-noise-pages must be a positive integer or 'none', got {raw!r}"
+        ) from None
+    if value <= 0:
+        raise SystemExit(f"--max-noise-pages must be a positive integer or 'none', got {raw!r}")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Seed the operational DB and document corpus")
     parser.add_argument(
@@ -215,8 +268,19 @@ def main(argv: list[str] | None = None) -> int:
         metavar="N|all",
         help="how many noise files to ingest (fixed seed); default 150",
     )
+    parser.add_argument(
+        "--max-noise-pages",
+        default=str(DEFAULT_MAX_NOISE_PAGES),
+        metavar="N|none",
+        help=(
+            "exclude noise PDFs over this many pages before sampling, so a few "
+            f"multi-hundred-page outliers can't dominate ingestion time; default "
+            f"{DEFAULT_MAX_NOISE_PAGES}, 'none' disables the filter"
+        ),
+    )
     args = parser.parse_args(argv)
     noise_sample = _parse_noise_sample(args.noise_sample)
+    max_noise_pages = _parse_max_noise_pages(args.max_noise_pages)
 
     logger.info("running migrations")
     applied = run_migrations()
@@ -230,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     stage_noise_corpus()
-    selection = select_corpus(noise_sample)
+    selection = select_corpus(noise_sample, max_noise_pages=max_noise_pages)
     if selection.total == 0:
         logger.warning("no documents found under {} — nothing to ingest", DOCS_DIR)
         return 0

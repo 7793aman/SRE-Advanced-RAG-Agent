@@ -53,13 +53,21 @@ def generate_text(
     prompt: str,
     system_prompt: str | None = None,
     model: str | None = None,
-    temperature: float = 0.2,
+    temperature: float | None = None,
 ) -> LLMResponse:
-    completion = _get_client().chat.completions.create(
-        model=model or settings.llm_model_answer,
-        messages=_messages(prompt, system_prompt),
-        temperature=temperature,
-    )
+    model_name = model or settings.llm_model_answer
+    messages = _messages(prompt, system_prompt)
+    # Not every model accepts a custom temperature (some frontier models,
+    # gpt-5.6-terra included, only support their own default and reject any
+    # other value with a 400). Omitting the parameter entirely when the
+    # caller hasn't asked for a specific value sidesteps that everywhere,
+    # rather than hardcoding a per-model allow-list.
+    if temperature is None:
+        completion = _get_client().chat.completions.create(model=model_name, messages=messages)
+    else:
+        completion = _get_client().chat.completions.create(
+            model=model_name, messages=messages, temperature=temperature
+        )
     return _to_response(completion)
 
 
@@ -67,11 +75,19 @@ def generate_json(
     prompt: str,
     system_prompt: str | None = None,
     model: str | None = None,
+    temperature: float | None = None,
 ) -> LLMResponse:
-    completion = _get_client().chat.completions.create(
-        model=model or settings.llm_model_grader,
-        messages=_messages(prompt, system_prompt),
-        temperature=0.0,
-        response_format={"type": "json_object"},
-    )
+    model_name = model or settings.llm_model_grader
+    messages = _messages(prompt, system_prompt)
+    if temperature is None:
+        completion = _get_client().chat.completions.create(
+            model=model_name, messages=messages, response_format={"type": "json_object"}
+        )
+    else:
+        completion = _get_client().chat.completions.create(
+            model=model_name,
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=temperature,
+        )
     return _to_response(completion)

@@ -4,7 +4,8 @@ projectReport.pdf
 # Noise corpus — staged locally, file bodies never committed
 seed/docs/noisy_data/*
 !seed/docs/noisy_data/.gitkeep
-noisy_data 2/
+noisy_data 2
+noisy_data
 
 # Python
 .venv/
