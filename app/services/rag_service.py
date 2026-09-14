@@ -8,24 +8,31 @@ in the way. The eval harness (ticket #33) calls it directly.
 `run_rag` is what `/query` actually calls: a cache read, and on a miss, a
 call to the trace function followed by a cache write.
 
-`_retrieve` branches on `flags["search_mode"]` (dense / sparse / hybrid) —
-rerank/HyDE/CRAG/self-reflection are later tickets, each adding a real
-behaviour behind its own flag. `flags` is threaded through and cached against
-in full regardless, because story #42 requires the rag_answer cache key to
-include every flag: toggling one, even one this ticket doesn't act on yet,
-must not return another profile's stale cached answer.
+`_retrieve` branches on `flags["search_mode"]` (dense / sparse / hybrid), then
+optionally reranks — HyDE/CRAG/self-reflection are later tickets, each adding
+a real behaviour behind its own flag. `flags` is threaded through and cached
+against in full regardless, because story #42 requires the rag_answer cache
+key to include every flag: toggling one, even one this ticket doesn't act on
+yet, must not return another profile's stale cached answer.
+
+When `enable_rerank` is set, retrieval asks for `settings.reranker_initial_top_k`
+candidates (a wider pool than the final `top_k`) so the cross-encoder has a real
+shortlist to re-sort — the gold chunk hybrid search buried at rank 8 only has a
+chance to reach the top 5 if it was actually retrieved in the first place.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from app.config import settings
 from app.models import ChatResponse, ResponseMetadata, RetrievedChunk, RetrievedChunkPreview
 from app.security.spotlighting import spotlight_chunks
 from app.security.system_prompt import SYSTEM_PROMPT
 from app.services.embedding_service import embed_texts
 from app.services.llm_service import generate_text
 from app.services.query_cache_service import query_cache
+from app.services.reranker_service import rerank
 from app.services.vector_store import hybrid_search, search, sparse_search
 
 _CHUNK_PREVIEW_CHARS = 200
@@ -55,12 +62,23 @@ def _sources(chunks: list[RetrievedChunk]) -> list[str]:
 def _retrieve(question: str, query_vector: list[float], flags: dict[str, Any]) -> list[RetrievedChunk]:
     top_k = int(flags.get("top_k", 5))
     search_mode = flags.get("search_mode", "dense")
+    enable_rerank = flags.get("enable_rerank", False)
+
+    # top_k can be requested up to 50 (QueryRequest); reranker_initial_top_k
+    # (20) is only a *floor* on the candidate pool, not a cap on top_k itself.
+    retrieve_k = max(top_k, settings.reranker_initial_top_k) if enable_rerank else top_k
 
     if search_mode == "sparse":
-        return sparse_search(question, top_k=top_k)
-    if search_mode == "hybrid":
-        return hybrid_search(question, query_vector, top_k=top_k)
-    return search(query_vector, top_k=top_k)
+        chunks = sparse_search(question, top_k=retrieve_k)
+    elif search_mode == "hybrid":
+        chunks = hybrid_search(question, query_vector, top_k=retrieve_k)
+    else:
+        chunks = search(query_vector, top_k=retrieve_k)
+
+    if enable_rerank:
+        chunks = rerank(question, chunks)
+
+    return chunks[:top_k]
 
 
 def run_rag_with_trace(

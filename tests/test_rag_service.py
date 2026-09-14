@@ -222,3 +222,72 @@ def test_different_flags_are_a_cache_miss_even_for_the_same_question(
     run_rag("What is a Pod?", {**_FLAGS, "enable_rerank": True})
 
     assert len(fake_generate.calls) == 2  # story #42: flags are part of the cache key
+
+
+# --- enable_rerank: retrieve wide, rerank, then cut to top_k ----------------
+
+
+def test_rerank_disabled_retrieves_only_top_k_and_never_calls_rerank(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.rerank",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("rerank should not be called")),
+    )
+
+    run_rag_with_trace("What is a Pod?", _FLAGS)
+
+    assert fake_search[0]["top_k"] == 5  # _FLAGS["top_k"]
+
+
+def test_rerank_enabled_retrieves_the_wider_candidate_pool(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.config import settings
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.rerank", lambda question, chunks: chunks)
+
+    run_rag_with_trace("What is a Pod?", {**_FLAGS, "enable_rerank": True})
+
+    assert fake_search[0]["top_k"] == settings.reranker_initial_top_k
+
+
+def test_rerank_enabled_with_top_k_above_the_initial_pool_still_retrieves_top_k(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """QueryRequest allows top_k up to 50 (app/models.py), well above the
+    default reranker_initial_top_k of 20 — the wider pool is a floor, not a
+    cap, so a caller asking for more chunks than that must still get them."""
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.rerank", lambda question, chunks: chunks)
+
+    run_rag_with_trace("What is a Pod?", {**_FLAGS, "enable_rerank": True, "top_k": 30})
+
+    assert fake_search[0]["top_k"] == 30
+
+
+def test_rerank_enabled_reorders_before_cutting_to_top_k(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    wide_chunks = [
+        RetrievedChunk(text="noise", source=f"doc{i}.html", score=0.1) for i in range(20)
+    ]
+    gold = RetrievedChunk(text="the real answer", source="gold.html", score=0.05)
+    wide_chunks[7] = gold  # the gold chunk sits at rank 8, outside a top-5 cut
+
+    monkeypatch.setattr("app.services.rag_service.search", lambda *a, **k: wide_chunks)
+    monkeypatch.setattr(
+        "app.services.rag_service.rerank",
+        lambda question, chunks: [gold, *[c for c in chunks if c is not gold]],
+    )
+
+    _, chunks = run_rag_with_trace("What is a Pod?", {**_FLAGS, "enable_rerank": True, "top_k": 5})
+
+    assert chunks[0] == gold
+    assert len(chunks) == 5
