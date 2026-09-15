@@ -87,7 +87,7 @@ def test_mid_score_in_the_ambiguous_band_merges_corpus_and_web_results(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == [*_CHUNKS, *_WEB_CHUNKS]
+    assert result == _CHUNKS + _WEB_CHUNKS
 
 
 def test_score_exactly_at_the_relevance_threshold_counts_as_correct(
@@ -152,7 +152,7 @@ def test_ambiguous_grade_caps_the_merged_result_at_the_callers_top_k(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS, top_k=1)
 
-    assert result == [*_CHUNKS, *_WEB_CHUNKS][:1]
+    assert result == (_CHUNKS + _WEB_CHUNKS)[:1]
 
 
 # --- empty retrieval: skip the grader entirely ------------------------------

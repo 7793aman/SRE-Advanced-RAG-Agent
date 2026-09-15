@@ -125,5 +125,7 @@ def evaluate_and_correct(
         return chunks
 
     if evaluation.relevance_score >= settings.crag_ambiguous_threshold:
-        return [*chunks, *web_chunks][:top_k]
+        combined = chunks + web_chunks
+        return combined[:top_k]
+
     return web_chunks[:top_k]
