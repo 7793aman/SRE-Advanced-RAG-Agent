@@ -45,6 +45,32 @@ def test_generates_configured_number_of_hypotheses_plus_the_original_question(
     assert len(calls) == 2  # settings.hyde_num_hypotheses
 
 
+def test_hypothesis_generation_uses_a_system_prompt_and_a_non_zero_temperature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Identical, low-temperature completions for the same question would
+    waste every extra hypothesis — they all embed to roughly the same
+    vector, so a higher temperature is what actually gives HyDE N distinct
+    angles to search with."""
+    from app.services import hyde_service
+
+    calls: list[dict] = []
+
+    def _fake_generate(prompt: str, **kwargs: object) -> LLMResponse:
+        calls.append({"prompt": prompt, **kwargs})
+        return LLMResponse(text="a hypothesis")
+
+    monkeypatch.setattr(hyde_service, "generate_text", _fake_generate)
+    monkeypatch.setattr(hyde_service, "embed_texts", _fake_embed)
+    monkeypatch.setattr(hyde_service, "search", lambda vector, top_k=5: [])
+
+    hyde_service.hyde_search("why is my pod OOMKilled?")
+
+    assert calls[0]["prompt"] == "why is my pod OOMKilled?"
+    assert calls[0]["system_prompt"]
+    assert calls[0]["temperature"] > 0
+
+
 def test_searches_once_per_hypothesis_plus_once_for_the_original_question(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -152,23 +178,8 @@ def test_full_search_dedupes_across_hypotheses_and_sorts_by_score_descending(
     gold_strong = RetrievedChunk(text="the real answer", source="gold.html", score=0.95)
     noise = RetrievedChunk(text="unrelated noise", source="noise.html", score=0.5)
 
-    # Per-vector searches now run concurrently (see hyde_search), so which of
-    # the 3 fixed result lists lands on which call is nondeterministic — but
-    # the final merge+dedupe+sort is order-independent, so the assertions
-    # below hold regardless of assignment order.
-    import itertools
-    import threading
-
-    lock = threading.Lock()
-    counter = itertools.count()
-    result_lists = [[gold_weak, noise], [gold_strong], [noise]]
-
-    def _fake_search(vector: list[float], top_k: int = 5) -> list[RetrievedChunk]:
-        with lock:
-            i = next(counter)
-        return result_lists[i]
-
-    monkeypatch.setattr(hyde_service, "search", _fake_search)
+    results_by_call = iter([[gold_weak, noise], [gold_strong], [noise]])
+    monkeypatch.setattr(hyde_service, "search", lambda vector, top_k=5: next(results_by_call))
 
     result = hyde_service.hyde_search("why is my pod OOMKilled?", top_k=5)
 
