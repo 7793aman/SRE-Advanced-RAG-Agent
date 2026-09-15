@@ -73,6 +73,18 @@ def fake_generate(monkeypatch: pytest.MonkeyPatch) -> _FakeGenerate:
     return fake
 
 
+@pytest.fixture(autouse=True)
+def _crag_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test above is about search/rerank/HyDE orchestration, not CRAG
+    grading — default `evaluate_and_correct` to an identity pass-through so
+    those tests don't need to know CRAG exists. The CRAG-wiring tests below
+    override this per-test to exercise the real call."""
+    monkeypatch.setattr(
+        "app.services.rag_service.evaluate_and_correct",
+        lambda question, chunks, top_k=5: chunks,
+    )
+
+
 # --- run_rag_with_trace: the uncached, traced entry point ------------------
 
 
@@ -369,3 +381,75 @@ def test_hyde_result_is_still_cut_to_top_k(
     )
 
     assert len(chunks) == 3
+
+
+# --- enable_crag: grade the final top_k chunks, correct on a weak grade ----
+
+
+def test_crag_disabled_never_calls_evaluate_and_correct(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.evaluate_and_correct",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("evaluate_and_correct should not be called")
+        ),
+    )
+
+    _, chunks = run_rag_with_trace("What is a Pod?", {**_FLAGS, "enable_crag": False})
+
+    assert chunks == _CHUNKS
+
+
+def test_crag_enabled_grades_the_final_top_k_chunks(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CRAG must see the chunks that will actually be generated from — the
+    post-rerank, post-top_k-cut set — not the wider pre-cut candidate pool."""
+    from app.services.rag_service import run_rag_with_trace
+
+    wide_chunks = [
+        RetrievedChunk(text=f"chunk {i}", source=f"doc{i}.html", score=0.9 - i / 100)
+        for i in range(10)
+    ]
+    monkeypatch.setattr("app.services.rag_service.search", lambda *a, **k: wide_chunks)
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "app.services.rag_service.evaluate_and_correct",
+        lambda question, chunks, top_k=5: (
+            calls.append({"question": question, "chunks": chunks, "top_k": top_k}) or chunks
+        ),
+    )
+
+    run_rag_with_trace("What is a Pod?", {**_FLAGS, "top_k": 3})
+
+    assert calls[0]["question"] == "What is a Pod?"
+    assert calls[0]["chunks"] == wide_chunks[:3]
+    assert calls[0]["top_k"] == 3
+
+
+def test_crag_correction_replaces_the_chunks_used_to_generate_and_cite(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Whatever evaluate_and_correct returns (e.g. web results swapped in for
+    a low-grade corpus retrieval) is what actually reaches the prompt and the
+    response's sources — not the pre-CRAG chunk set."""
+    from app.services.rag_service import run_rag_with_trace
+
+    web_chunk = RetrievedChunk(
+        text="Kubernetes v1.32 is the latest stable release.",
+        source="https://kubernetes.io/releases/",
+        score=0.9,
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.evaluate_and_correct",
+        lambda question, chunks, top_k=5: [web_chunk],
+    )
+
+    response, chunks = run_rag_with_trace("What's the latest stable Kubernetes release?", _FLAGS)
+
+    assert chunks == [web_chunk]
+    assert response.sources == ["https://kubernetes.io/releases/"]

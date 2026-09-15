@@ -9,11 +9,12 @@ in the way. The eval harness (ticket #33) calls it directly.
 call to the trace function followed by a cache write.
 
 `_retrieve` branches on `flags["search_mode"]` (dense / sparse / hybrid), then
-optionally reranks — CRAG/self-reflection are later tickets, each adding a
-real behaviour behind its own flag. `flags` is threaded through and cached
-against in full regardless, because story #42 requires the rag_answer cache
-key to include every flag: toggling one, even one this ticket doesn't act on
-yet, must not return another profile's stale cached answer.
+optionally reranks and grades the result with CRAG — self-reflection is still
+a later ticket, adding its own real behaviour behind its own flag. `flags` is
+threaded through and cached against in full regardless, because story #42
+requires the rag_answer cache key to include every flag: toggling one, even
+one this ticket doesn't act on yet, must not return another profile's stale
+cached answer.
 
 When `enable_hyde` is set, it takes over the retrieval step entirely in
 place of `search_mode`'s dense/sparse/hybrid branch: HyDE already does its
@@ -24,6 +25,10 @@ When `enable_rerank` is set, retrieval asks for `settings.reranker_initial_top_k
 candidates (a wider pool than the final `top_k`) so the cross-encoder has a real
 shortlist to re-sort — the gold chunk hybrid search buried at rank 8 only has a
 chance to reach the top 5 if it was actually retrieved in the first place.
+
+When `enable_crag` is set (the default), the final `top_k` chunks are graded
+for relevance before generation; a weak grade corrects them with a Tavily web
+search rather than generating confidently from noise — see `crag_service.py`.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from app.config import settings
 from app.models import ChatResponse, ResponseMetadata, RetrievedChunk, RetrievedChunkPreview
 from app.security.spotlighting import spotlight_chunks
 from app.security.system_prompt import SYSTEM_PROMPT
+from app.services.crag_service import evaluate_and_correct
 from app.services.embedding_service import embed_texts
 from app.services.hyde_service import hyde_search
 from app.services.llm_service import generate_text
@@ -72,6 +78,7 @@ def _retrieve(
     search_mode = flags.get("search_mode", "dense")
     enable_rerank = flags.get("enable_rerank", False)
     enable_hyde = flags.get("enable_hyde", False)
+    enable_crag = flags.get("enable_crag", True)
 
     # top_k can be requested up to 50 (QueryRequest); reranker_initial_top_k
     # (20) is only a *floor* on the candidate pool, not a cap on top_k itself.
@@ -89,7 +96,12 @@ def _retrieve(
     if enable_rerank:
         chunks = rerank(question, chunks)
 
-    return chunks[:top_k]
+    chunks = chunks[:top_k]
+
+    if enable_crag:
+        chunks = evaluate_and_correct(question, chunks, top_k=top_k)
+
+    return chunks
 
 
 def run_rag_with_trace(
