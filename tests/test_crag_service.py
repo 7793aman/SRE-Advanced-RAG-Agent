@@ -1,0 +1,315 @@
+"""Unit seam: evaluate_and_correct(), with the grader LLM call and Tavily web
+search both faked. Nothing here calls OpenAI or Tavily.
+
+Threshold behaviour (app/config.py defaults):
+  score >= crag_relevance_threshold (0.7)                  -> correct, no web call
+  crag_ambiguous_threshold (0.5) <= score < 0.7             -> ambiguous, corpus + web
+  score < crag_ambiguous_threshold (0.5)                    -> incorrect, web only
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from app.models import RetrievedChunk
+from app.services.llm_service import LLMResponse
+from app.services.web_search_service import WebSearchUnconfiguredError
+
+_CHUNKS = [
+    RetrievedChunk(text="A Pod is the smallest deployable unit.", source="pods.html", score=0.6),
+]
+_WEB_CHUNKS = [
+    RetrievedChunk(
+        text="Kubernetes v1.32 is the latest stable release.",
+        source="https://kubernetes.io/releases/",
+        score=0.9,
+    )
+]
+
+
+def _grade_response(score: float, label: str = "") -> LLMResponse:
+    return LLMResponse(
+        text=json.dumps(
+            {
+                "relevance_score": score,
+                "relevance_label": label,
+                "confidence": 0.8,
+                "reasoning": "test",
+            }
+        )
+    )
+
+
+# --- thresholds: correct / ambiguous / incorrect ----------------------------
+
+
+def test_high_score_keeps_the_chunks_unchanged_and_never_calls_web_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.9))
+    monkeypatch.setattr(
+        crag_service,
+        "web_search",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("web_search should not be called")),
+    )
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result == _CHUNKS
+
+
+def test_low_score_below_ambiguous_threshold_discards_the_corpus_for_web_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.2))
+    monkeypatch.setattr(crag_service, "web_search", lambda *a, **k: list(_WEB_CHUNKS))
+
+    result = crag_service.evaluate_and_correct(
+        "What's the latest stable Kubernetes release?", _CHUNKS
+    )
+
+    assert result == _WEB_CHUNKS
+
+
+def test_mid_score_in_the_ambiguous_band_merges_corpus_and_web_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.6))
+    monkeypatch.setattr(crag_service, "web_search", lambda *a, **k: list(_WEB_CHUNKS))
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result == [*_CHUNKS, *_WEB_CHUNKS]
+
+
+def test_score_exactly_at_the_relevance_threshold_counts_as_correct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.config import settings
+    from app.services import crag_service
+
+    monkeypatch.setattr(
+        crag_service,
+        "generate_json",
+        lambda *a, **k: _grade_response(settings.crag_relevance_threshold),
+    )
+    monkeypatch.setattr(
+        crag_service,
+        "web_search",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("web_search should not be called")),
+    )
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result == _CHUNKS
+
+
+# --- top_k: the caller's chunk count, not Tavily's own default -------------
+
+
+def test_incorrect_grade_requests_and_caps_web_results_at_the_callers_top_k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    ten_web_chunks = [
+        RetrievedChunk(
+            text=f"web result {i}", source=f"https://example.com/{i}", score=0.9 - i / 100
+        )
+        for i in range(10)
+    ]
+    calls: list[dict] = []
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.1))
+    monkeypatch.setattr(
+        crag_service,
+        "web_search",
+        lambda question, max_results=5: (
+            calls.append({"max_results": max_results}) or ten_web_chunks
+        ),
+    )
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS, top_k=3)
+
+    assert calls[0]["max_results"] == 3
+    assert result == ten_web_chunks[:3]
+
+
+def test_ambiguous_grade_caps_the_merged_result_at_the_callers_top_k(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.6))
+    monkeypatch.setattr(crag_service, "web_search", lambda *a, **k: list(_WEB_CHUNKS))
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS, top_k=1)
+
+    assert result == [*_CHUNKS, *_WEB_CHUNKS][:1]
+
+
+# --- empty retrieval: skip the grader entirely ------------------------------
+
+
+def test_empty_retrieval_skips_the_grader_and_goes_straight_to_web_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(
+        crag_service,
+        "generate_json",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("grader should not be called")),
+    )
+    monkeypatch.setattr(crag_service, "web_search", lambda *a, **k: list(_WEB_CHUNKS))
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", [])
+
+    assert result == _WEB_CHUNKS
+
+
+# --- graceful degradation: a broken/unconfigured web fallback never crashes -
+
+
+def test_unconfigured_web_search_degrades_to_the_original_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.1))
+
+    def _boom(*a: object, **k: object) -> list[RetrievedChunk]:
+        raise WebSearchUnconfiguredError("TAVILY_API_KEY is not configured")
+
+    monkeypatch.setattr(crag_service, "web_search", _boom)
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result == _CHUNKS
+
+
+def test_grader_call_failure_skips_correction_and_never_calls_web_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken judge isn't evidence the retrieval is bad — a grader outage
+    must degrade to leaving the chunks alone, not to assuming they're wrong
+    and spending a Tavily call on every request while OpenAI is down."""
+    from app.services import crag_service
+
+    monkeypatch.setattr(
+        crag_service,
+        "generate_json",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("OpenAI is down")),
+    )
+    monkeypatch.setattr(
+        crag_service,
+        "web_search",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("web_search should not be called")),
+    )
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result == _CHUNKS
+
+
+def test_web_search_failure_also_degrades_to_the_original_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.1))
+    monkeypatch.setattr(
+        crag_service,
+        "web_search",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Tavily API timed out")),
+    )
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result == _CHUNKS
+
+
+def test_unconfigured_web_search_on_empty_retrieval_degrades_to_an_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty retrieval + no web fallback available: nothing crashes, and
+    there's honestly nothing to answer from — an empty list, same as any
+    other zero-chunk retrieval the rest of the pipeline already handles."""
+    from app.services import crag_service
+
+    def _boom(*a: object, **k: object) -> list[RetrievedChunk]:
+        raise WebSearchUnconfiguredError("TAVILY_API_KEY is not configured")
+
+    monkeypatch.setattr(crag_service, "web_search", _boom)
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", [])
+
+    assert result == []
+
+
+# --- malformed grader output: treat as incorrect, don't crash --------------
+
+
+def test_malformed_grader_json_treats_retrieval_as_incorrect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    monkeypatch.setattr(
+        crag_service, "generate_json", lambda *a, **k: LLMResponse(text="not valid json")
+    )
+    monkeypatch.setattr(crag_service, "web_search", lambda *a, **k: list(_WEB_CHUNKS))
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result == _WEB_CHUNKS
+
+
+# --- the grading prompt -----------------------------------------------------
+
+
+def test_grading_prompt_includes_the_question_and_each_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import crag_service
+
+    calls: list[dict] = []
+
+    def _fake_generate_json(prompt: str, **kwargs: object) -> LLMResponse:
+        calls.append({"prompt": prompt, **kwargs})
+        return _grade_response(0.9)
+
+    monkeypatch.setattr(crag_service, "generate_json", _fake_generate_json)
+
+    crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert "What is a Pod?" in calls[0]["prompt"]
+    assert "pods.html" in calls[0]["prompt"]
+    assert "A Pod is the smallest deployable unit." in calls[0]["prompt"]
+
+
+# --- logging: the grade is always logged, per the issue's scope ------------
+
+
+def test_grade_is_logged(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    from loguru import logger
+
+    from app.services import crag_service
+
+    monkeypatch.setattr(crag_service, "generate_json", lambda *a, **k: _grade_response(0.9))
+
+    messages: list[str] = []
+    handler_id = logger.add(lambda msg: messages.append(str(msg)), level="INFO")
+    try:
+        crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+    finally:
+        logger.remove(handler_id)
+
+    assert any("0.9" in m or "0.90" in m for m in messages)
