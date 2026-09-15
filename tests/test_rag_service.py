@@ -291,3 +291,81 @@ def test_rerank_enabled_reorders_before_cutting_to_top_k(
 
     assert chunks[0] == gold
     assert len(chunks) == 5
+
+
+# --- enable_hyde: HyDE replaces the retrieval step (ticket #26) ------------
+
+
+def test_hyde_disabled_never_calls_hyde_search(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.hyde_search",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("hyde_search should not be called")),
+    )
+
+    run_rag_with_trace("What is a Pod?", _FLAGS)
+
+    assert fake_search  # plain dense search was used instead
+
+
+def test_hyde_enabled_calls_hyde_search_instead_of_plain_search(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "app.services.rag_service.hyde_search",
+        lambda question, top_k: (
+            calls.append({"question": question, "top_k": top_k}) or list(_CHUNKS)
+        ),
+    )
+
+    response, chunks = run_rag_with_trace(
+        "Why is my pod OOMKilled?", {**_FLAGS, "enable_hyde": True}
+    )
+
+    assert calls == [{"question": "Why is my pod OOMKilled?", "top_k": 5}]
+    assert fake_search == []  # plain dense search was bypassed
+    assert chunks == _CHUNKS
+
+
+def test_hyde_enabled_with_rerank_retrieves_the_wider_candidate_pool(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.config import settings
+    from app.services.rag_service import run_rag_with_trace
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "app.services.rag_service.hyde_search",
+        lambda question, top_k: calls.append({"top_k": top_k}) or list(_CHUNKS),
+    )
+    monkeypatch.setattr("app.services.rag_service.rerank", lambda question, chunks: chunks)
+
+    run_rag_with_trace(
+        "Why is my pod OOMKilled?", {**_FLAGS, "enable_hyde": True, "enable_rerank": True}
+    )
+
+    assert calls[0]["top_k"] == settings.reranker_initial_top_k
+
+
+def test_hyde_result_is_still_cut_to_top_k(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    wide_chunks = [
+        RetrievedChunk(text=f"chunk {i}", source=f"doc{i}.html", score=0.9 - i / 100)
+        for i in range(10)
+    ]
+    monkeypatch.setattr("app.services.rag_service.hyde_search", lambda question, top_k: wide_chunks)
+
+    _, chunks = run_rag_with_trace(
+        "Why is my pod OOMKilled?", {**_FLAGS, "enable_hyde": True, "top_k": 3}
+    )
+
+    assert len(chunks) == 3
