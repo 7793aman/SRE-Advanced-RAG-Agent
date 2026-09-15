@@ -16,6 +16,8 @@ fallback (story #18).
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from loguru import logger
 
 from app.config import settings
@@ -37,14 +39,21 @@ _HYPOTHESIS_TEMPERATURE = 0.7
 
 
 def _generate_hypotheses(question: str, n: int) -> list[str]:
-    hypotheses = []
-    for _ in range(n):
-        response = generate_text(
-            question, system_prompt=_HYDE_SYSTEM_PROMPT, temperature=_HYPOTHESIS_TEMPERATURE
+    if n <= 0:
+        return []
+    # The N hypotheses don't depend on each other, so they're generated
+    # concurrently — sequential would multiply this call's tail latency by
+    # hyde_num_hypotheses for no benefit.
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        responses = list(
+            pool.map(
+                lambda _: generate_text(
+                    question, system_prompt=_HYDE_SYSTEM_PROMPT, temperature=_HYPOTHESIS_TEMPERATURE
+                ),
+                range(n),
+            )
         )
-        if response.text.strip():
-            hypotheses.append(response.text.strip())
-    return hypotheses
+    return [response.text.strip() for response in responses if response.text.strip()]
 
 
 def _normalise(text: str) -> str:
@@ -79,9 +88,11 @@ def hyde_search(question: str, top_k: int = 5) -> list[RetrievedChunk]:
     texts = [*hypotheses, question]
     vectors = embed_texts(texts)
 
-    all_chunks: list[RetrievedChunk] = []
-    for vector in vectors:
-        all_chunks.extend(search(vector, top_k=top_k))
+    # One vector-store search per embedding, also run concurrently — each
+    # search is independent of the others.
+    with ThreadPoolExecutor(max_workers=len(vectors)) as pool:
+        result_lists = list(pool.map(lambda vector: search(vector, top_k=top_k), vectors))
+    all_chunks = [chunk for chunks in result_lists for chunk in chunks]
 
     deduped = _dedupe_keep_best(all_chunks)
     return sorted(deduped, key=lambda chunk: chunk.score, reverse=True)[:top_k]

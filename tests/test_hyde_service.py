@@ -178,8 +178,23 @@ def test_full_search_dedupes_across_hypotheses_and_sorts_by_score_descending(
     gold_strong = RetrievedChunk(text="the real answer", source="gold.html", score=0.95)
     noise = RetrievedChunk(text="unrelated noise", source="noise.html", score=0.5)
 
-    results_by_call = iter([[gold_weak, noise], [gold_strong], [noise]])
-    monkeypatch.setattr(hyde_service, "search", lambda vector, top_k=5: next(results_by_call))
+    # Per-vector searches run concurrently (see hyde_search), so which of the
+    # 3 fixed result lists lands on which call is nondeterministic — but the
+    # final merge+dedupe+sort is order-independent, so the assertions below
+    # hold regardless of assignment order.
+    import itertools
+    import threading
+
+    lock = threading.Lock()
+    counter = itertools.count()
+    result_lists = [[gold_weak, noise], [gold_strong], [noise]]
+
+    def _fake_search(vector: list[float], top_k: int = 5) -> list[RetrievedChunk]:
+        with lock:
+            i = next(counter)
+        return result_lists[i]
+
+    monkeypatch.setattr(hyde_service, "search", _fake_search)
 
     result = hyde_service.hyde_search("why is my pod OOMKilled?", top_k=5)
 
