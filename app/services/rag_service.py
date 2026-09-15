@@ -9,11 +9,16 @@ in the way. The eval harness (ticket #33) calls it directly.
 call to the trace function followed by a cache write.
 
 `_retrieve` branches on `flags["search_mode"]` (dense / sparse / hybrid), then
-optionally reranks — HyDE/CRAG/self-reflection are later tickets, each adding
-a real behaviour behind its own flag. `flags` is threaded through and cached
+optionally reranks — CRAG/self-reflection are later tickets, each adding a
+real behaviour behind its own flag. `flags` is threaded through and cached
 against in full regardless, because story #42 requires the rag_answer cache
 key to include every flag: toggling one, even one this ticket doesn't act on
 yet, must not return another profile's stale cached answer.
+
+When `enable_hyde` is set, it takes over the retrieval step entirely in
+place of `search_mode`'s dense/sparse/hybrid branch: HyDE already does its
+own dense search per hypothesis (see `hyde_service.py`), so there's nothing
+left for `search_mode` to pick between.
 
 When `enable_rerank` is set, retrieval asks for `settings.reranker_initial_top_k`
 candidates (a wider pool than the final `top_k`) so the cross-encoder has a real
@@ -30,6 +35,7 @@ from app.models import ChatResponse, ResponseMetadata, RetrievedChunk, Retrieved
 from app.security.spotlighting import spotlight_chunks
 from app.security.system_prompt import SYSTEM_PROMPT
 from app.services.embedding_service import embed_texts
+from app.services.hyde_service import hyde_search
 from app.services.llm_service import generate_text
 from app.services.query_cache_service import query_cache
 from app.services.reranker_service import rerank
@@ -59,16 +65,21 @@ def _sources(chunks: list[RetrievedChunk]) -> list[str]:
     return list(dict.fromkeys(chunk.source for chunk in chunks))
 
 
-def _retrieve(question: str, query_vector: list[float], flags: dict[str, Any]) -> list[RetrievedChunk]:
+def _retrieve(
+    question: str, query_vector: list[float], flags: dict[str, Any]
+) -> list[RetrievedChunk]:
     top_k = int(flags.get("top_k", 5))
     search_mode = flags.get("search_mode", "dense")
     enable_rerank = flags.get("enable_rerank", False)
+    enable_hyde = flags.get("enable_hyde", False)
 
     # top_k can be requested up to 50 (QueryRequest); reranker_initial_top_k
     # (20) is only a *floor* on the candidate pool, not a cap on top_k itself.
     retrieve_k = max(top_k, settings.reranker_initial_top_k) if enable_rerank else top_k
 
-    if search_mode == "sparse":
+    if enable_hyde:
+        chunks = hyde_search(question, top_k=retrieve_k)
+    elif search_mode == "sparse":
         chunks = sparse_search(question, top_k=retrieve_k)
     elif search_mode == "hybrid":
         chunks = hybrid_search(question, query_vector, top_k=retrieve_k)
