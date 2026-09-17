@@ -179,3 +179,11 @@ class ReflectionResult(BaseModel):
     needs_regeneration: bool = False
     refined_question: str = ""
     reasoning: str = ""
+
+
+class RetrievalDecision(BaseModel):
+    """Self-RAG's adaptive-retrieval gate: whether a question needs a corpus
+    search at all, or can be answered directly from general knowledge."""
+
+    needs_retrieval: bool = True
+    reasoning: str = ""
