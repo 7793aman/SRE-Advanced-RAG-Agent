@@ -89,6 +89,7 @@ def test_query_passes_the_question_and_flags_through_to_the_rag_service(
         "enable_hyde": False,
         "enable_crag": True,
         "enable_self_reflective": False,
+        "enable_adaptive_retrieval": False,
         "top_k": 3,
     }
 

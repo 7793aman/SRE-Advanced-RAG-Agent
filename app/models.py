@@ -113,6 +113,7 @@ class QueryRequest(BaseModel):
     enable_hyde: bool = False
     enable_crag: bool = True
     enable_self_reflective: bool = False
+    enable_adaptive_retrieval: bool = False
     top_k: int = Field(default=5, ge=1, le=50)
 
     @field_validator("question")
@@ -178,4 +179,12 @@ class ReflectionResult(BaseModel):
     reflection_score: float = 0.0
     needs_regeneration: bool = False
     refined_question: str = ""
+    reasoning: str = ""
+
+
+class RetrievalDecision(BaseModel):
+    """Self-RAG's adaptive-retrieval gate: whether a question needs a corpus
+    search at all, or can be answered directly from general knowledge."""
+
+    needs_retrieval: bool = True
     reasoning: str = ""

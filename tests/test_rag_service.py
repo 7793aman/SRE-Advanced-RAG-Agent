@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.models import RetrievedChunk
+from app.models import ReflectionResult, RetrievedChunk
 from app.services.llm_service import LLMResponse
 from app.services.query_cache_service import MemoryBackend, QueryCacheService
 
@@ -22,6 +22,7 @@ _FLAGS = {
     "enable_hyde": False,
     "enable_crag": True,
     "enable_self_reflective": False,
+    "enable_adaptive_retrieval": False,
     "top_k": 5,
 }
 
@@ -453,3 +454,269 @@ def test_crag_correction_replaces_the_chunks_used_to_generate_and_cite(
 
     assert chunks == [web_chunk]
     assert response.sources == ["https://kubernetes.io/releases/"]
+
+
+# --- enable_self_reflective: the Self-RAG reflection loop (ticket #28) -----
+
+
+def test_self_reflective_disabled_never_calls_the_critic_or_retrieval_gate(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.reflect",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("reflect should not be called")),
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.needs_retrieval",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("needs_retrieval should not be called")
+        ),
+    )
+
+    response, _ = run_rag_with_trace("What is a Pod?", _FLAGS)
+
+    assert response.metadata.reflection_iterations == 0
+    assert response.metadata.reflection_score is None
+    assert response.metadata.refined_question is None
+
+
+def test_crisp_query_passes_on_the_first_try_with_zero_iterations(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.reflect",
+        lambda *a, **k: ReflectionResult(reflection_score=0.95, needs_regeneration=False),
+    )
+
+    response, _ = run_rag_with_trace("What is a Pod?", {**_FLAGS, "enable_self_reflective": True})
+
+    assert response.metadata.reflection_iterations == 0
+    assert response.metadata.reflection_score == pytest.approx(0.95)
+    assert response.metadata.refined_question is None
+    assert len(fake_generate.calls) == 1
+
+
+def test_vague_query_regenerates_with_a_refined_question(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    reflections = [
+        ReflectionResult(
+            reflection_score=0.3,
+            needs_regeneration=True,
+            refined_question="How do I scale a Deployment's replicas?",
+        ),
+        ReflectionResult(reflection_score=0.9, needs_regeneration=False),
+    ]
+    monkeypatch.setattr("app.services.rag_service.reflect", lambda *a, **k: reflections.pop(0))
+
+    response, _ = run_rag_with_trace(
+        "tell me about scaling", {**_FLAGS, "enable_self_reflective": True}
+    )
+
+    assert response.metadata.reflection_iterations >= 1
+    assert response.metadata.refined_question == "How do I scale a Deployment's replicas?"
+    assert response.metadata.reflection_score == pytest.approx(0.9)
+    assert len(fake_generate.calls) == 2
+    assert "How do I scale a Deployment's replicas?" in fake_generate.calls[1]["prompt"]
+
+
+def test_regeneration_stops_at_the_retry_ceiling_even_if_still_weak(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.config import settings
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.reflect",
+        lambda *a, **k: ReflectionResult(
+            reflection_score=0.1, needs_regeneration=True, refined_question="still vague"
+        ),
+    )
+
+    response, _ = run_rag_with_trace(
+        "tell me about scaling", {**_FLAGS, "enable_self_reflective": True}
+    )
+
+    assert response.metadata.reflection_iterations == settings.max_reflection_retries
+    assert len(fake_generate.calls) == settings.max_reflection_retries + 1
+
+
+# --- enable_adaptive_retrieval: story 17's skip-retrieval gate, independent
+# of enable_self_reflective (ticket #28's flags don't imply each other) ------
+
+
+def test_adaptive_retrieval_disabled_never_calls_the_retrieval_gate(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.needs_retrieval",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("needs_retrieval should not be called")
+        ),
+    )
+
+    response, chunks = run_rag_with_trace("What is a Pod?", _FLAGS)
+
+    assert response.metadata.route == "rag"
+    assert chunks == _CHUNKS
+
+
+def test_adaptive_retrieval_works_with_self_reflection_off(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skip-retrieval gate is a standalone guardrail — it must not
+    require the critique-and-retry loop to also be turned on."""
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.needs_retrieval", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "app.services.rag_service.reflect",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("reflect should not be called")),
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.search",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("search should not be called")),
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.embed_texts",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("embed_texts should not be called")),
+    )
+
+    response, chunks = run_rag_with_trace(
+        "What is 2 + 2?", {**_FLAGS, "enable_adaptive_retrieval": True}
+    )
+
+    assert chunks == []
+    assert response.metadata.route == "rag_general_knowledge"
+    assert response.metadata.reflection_iterations == 0
+    assert response.metadata.reflection_score is None
+
+
+def test_self_reflection_works_with_adaptive_retrieval_off(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The critique-and-retry loop is independent too — it must not require
+    the skip-retrieval gate to be turned on, and must never call it when
+    it's off."""
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr(
+        "app.services.rag_service.needs_retrieval",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("needs_retrieval should not be called")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.reflect",
+        lambda *a, **k: ReflectionResult(reflection_score=0.95, needs_regeneration=False),
+    )
+
+    response, chunks = run_rag_with_trace(
+        "What is a Pod?", {**_FLAGS, "enable_self_reflective": True}
+    )
+
+    assert response.metadata.route == "rag"
+    assert chunks == _CHUNKS
+
+
+def test_general_knowledge_question_skips_retrieval_entirely(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.needs_retrieval", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "app.services.rag_service.search",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("search should not be called")),
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.embed_texts",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("embed_texts should not be called")),
+    )
+
+    response, chunks = run_rag_with_trace(
+        "What is 2 + 2?", {**_FLAGS, "enable_adaptive_retrieval": True}
+    )
+
+    assert chunks == []
+    assert response.metadata.route == "rag_general_knowledge"
+    assert response.sources == []
+
+
+def test_general_knowledge_answer_prompt_has_no_retrieved_context(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.needs_retrieval", lambda *a, **k: False)
+
+    run_rag_with_trace("What is 2 + 2?", {**_FLAGS, "enable_adaptive_retrieval": True})
+
+    assert fake_generate.calls[0]["prompt"] == "What is 2 + 2?"
+
+
+def test_general_knowledge_answer_uses_the_general_knowledge_prompt_not_the_context_only_one(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SYSTEM_PROMPT demands "answer only from retrieved context, otherwise
+    say you don't know" — exactly wrong for a question that was deliberately
+    answered with no context. The general-knowledge path must use the
+    separate prompt that doesn't carry that rule."""
+    from app.security.system_prompt import GENERAL_KNOWLEDGE_SYSTEM_PROMPT, SYSTEM_PROMPT
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.needs_retrieval", lambda *a, **k: False)
+
+    run_rag_with_trace("What is 2 + 2?", {**_FLAGS, "enable_adaptive_retrieval": True})
+
+    assert fake_generate.calls[0]["system_prompt"] == GENERAL_KNOWLEDGE_SYSTEM_PROMPT
+    assert fake_generate.calls[0]["system_prompt"] != SYSTEM_PROMPT
+
+
+def test_general_knowledge_regeneration_stays_general_knowledge_and_never_retrieves(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reflection loop only regenerates — it must not revisit the
+    retrieve/skip decision `needs_retrieval` already made. A weak
+    general-knowledge answer is retried with no corpus lookup, not silently
+    upgraded to a real search (issue #28's own comment: "The reflection loop
+    only handles regeneration, not the retrieve/skip decision"). Needs both
+    flags on: adaptive retrieval to reach the general-knowledge path, and
+    self-reflection to trigger a retry at all."""
+    from app.security.system_prompt import GENERAL_KNOWLEDGE_SYSTEM_PROMPT
+    from app.services.rag_service import run_rag_with_trace
+
+    reflections = [
+        ReflectionResult(reflection_score=0.2, needs_regeneration=True, refined_question="2+2?"),
+        ReflectionResult(reflection_score=0.9, needs_regeneration=False),
+    ]
+    monkeypatch.setattr("app.services.rag_service.needs_retrieval", lambda *a, **k: False)
+    monkeypatch.setattr("app.services.rag_service.reflect", lambda *a, **k: reflections.pop(0))
+    monkeypatch.setattr(
+        "app.services.rag_service.search",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("search should not be called")),
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.embed_texts",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("embed_texts should not be called")),
+    )
+
+    response, chunks = run_rag_with_trace(
+        "What is 2 + 2?",
+        {**_FLAGS, "enable_self_reflective": True, "enable_adaptive_retrieval": True},
+    )
+
+    assert chunks == []
+    assert response.metadata.route == "rag_general_knowledge"
+    assert response.metadata.reflection_iterations == 1
+    assert len(fake_generate.calls) == 2
+    assert fake_generate.calls[1]["prompt"] == "2+2?"
+    assert fake_generate.calls[1]["system_prompt"] == GENERAL_KNOWLEDGE_SYSTEM_PROMPT

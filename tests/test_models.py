@@ -85,6 +85,7 @@ def test_query_request_defaults() -> None:
     assert req.enable_hyde is False
     assert req.enable_crag is True
     assert req.enable_self_reflective is False
+    assert req.enable_adaptive_retrieval is False
     assert req.top_k == 5
 
 

@@ -37,6 +37,7 @@ from pydantic import ValidationError
 
 from app.config import settings
 from app.models import CRAGEvaluation, RetrievedChunk
+from app.services.chunk_formatting import format_chunks
 from app.services.llm_service import generate_json
 from app.services.web_search_service import WebSearchUnconfiguredError, web_search
 
@@ -53,10 +54,6 @@ _GRADER_SYSTEM_PROMPT = (
 )
 
 
-def _format_chunks(chunks: list[RetrievedChunk]) -> str:
-    return "\n\n".join(f"[{chunk.source}] {chunk.text}" for chunk in chunks)
-
-
 def _grade(question: str, chunks: list[RetrievedChunk]) -> CRAGEvaluation:
     if not chunks:
         return CRAGEvaluation(
@@ -66,7 +63,7 @@ def _grade(question: str, chunks: list[RetrievedChunk]) -> CRAGEvaluation:
             reasoning="nothing was retrieved",
         )
 
-    prompt = f"Question: {question}\n\nRetrieved passages:\n{_format_chunks(chunks)}"
+    prompt = f"Question: {question}\n\nRetrieved passages:\n{format_chunks(chunks)}"
     try:
         response = generate_json(prompt, system_prompt=_GRADER_SYSTEM_PROMPT)
     except Exception:  # noqa: BLE001 — a grader outage degrades to "skip correction", never fails the request
