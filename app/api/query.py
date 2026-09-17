@@ -25,6 +25,7 @@ def _flags(body: QueryRequest) -> dict[str, object]:
         "enable_hyde": body.enable_hyde,
         "enable_crag": body.enable_crag,
         "enable_self_reflective": body.enable_self_reflective,
+        "enable_adaptive_retrieval": body.enable_adaptive_retrieval,
         "top_k": body.top_k,
     }
 

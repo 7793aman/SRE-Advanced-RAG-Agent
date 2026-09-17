@@ -29,28 +29,32 @@ When `enable_crag` is set (the default), the final `top_k` chunks are graded
 for relevance before generation; a weak grade corrects them with a Tavily web
 search rather than generating confidently from noise — see `crag_service.py`.
 
-When `enable_self_reflective` is set, two things change (see
+Two Self-RAG flags exist and are independent of each other (see
 `reflection_service.py`):
 
-  - Before retrieving at all, `needs_retrieval` decides whether the question
-    is general knowledge the model can answer directly; if so, retrieval and
-    CRAG are skipped entirely, and generation runs under
+  - `enable_adaptive_retrieval` controls `needs_retrieval`: whether the
+    question is general knowledge the model can answer directly. If so,
+    retrieval and CRAG are skipped entirely, and generation runs under
     `GENERAL_KNOWLEDGE_SYSTEM_PROMPT` instead of the corpus-only
     `SYSTEM_PROMPT` (`route="rag_general_knowledge"` in the response
     metadata) — `SYSTEM_PROMPT` demands an "I don't know" for anything not in
     the retrieved context, which is exactly wrong when there deliberately is
-    none.
-  - After each generation, `reflect` critiques the answer against the
-    *original* question, and `should_regenerate` — bounded by
+    none. This flag works whether or not `enable_self_reflective` is set: a
+    skipped-retrieval answer is just returned as-is if reflection is off.
+  - `enable_self_reflective` controls the critique-and-retry loop: after
+    each generation, `reflect` critiques the answer against the *original*
+    question, and `should_regenerate` — bounded by
     `settings.max_reflection_retries` — decides whether to loop again with a
     sharpened question. The reflection loop only ever regenerates; it never
     re-decides retrieve-vs-skip, so a regeneration stays in whichever regime
-    `needs_retrieval` chose at the top: a corpus question reruns retrieval
-    (and CRAG) on the refined question, since the sharpened question is only
-    worth anything against context retrieved for it, while a general-
-    knowledge question regenerates again with no retrieval. `reflection_iterations`,
-    `reflection_score`, and `refined_question` surface this in the response
-    metadata regardless of which path ran.
+    `needs_retrieval` chose at the top (or the corpus regime, if
+    `enable_adaptive_retrieval` was never on to begin with): a corpus
+    question reruns retrieval (and CRAG) on the refined question, since the
+    sharpened question is only worth anything against context retrieved for
+    it, while a general-knowledge question regenerates again with no
+    retrieval. `reflection_iterations`, `reflection_score`, and
+    `refined_question` surface this in the response metadata regardless of
+    which path ran.
 """
 
 from __future__ import annotations
@@ -145,7 +149,8 @@ def run_rag_with_trace(
     harness call directly.
     """
     enable_self_reflective = flags.get("enable_self_reflective", False)
-    skip_retrieval = enable_self_reflective and not needs_retrieval(question)
+    enable_adaptive_retrieval = flags.get("enable_adaptive_retrieval", False)
+    skip_retrieval = enable_adaptive_retrieval and not needs_retrieval(question)
 
     if skip_retrieval:
         route = "rag_general_knowledge"

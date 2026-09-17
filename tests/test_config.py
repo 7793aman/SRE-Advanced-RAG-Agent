@@ -59,6 +59,7 @@ def test_technique_toggle_defaults_agree_with_query_schema(defaults: Settings) -
     assert defaults.reranking_enabled_by_default is req.enable_rerank is False
     assert defaults.crag_enabled_by_default is req.enable_crag is True
     assert defaults.self_reflective_enabled_by_default is req.enable_self_reflective is False
+    assert defaults.adaptive_retrieval_enabled_by_default is req.enable_adaptive_retrieval is False
 
 
 def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:

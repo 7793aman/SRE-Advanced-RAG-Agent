@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     reflection_min_score: float = 0.85
     max_reflection_retries: int = 2
     self_reflective_enabled_by_default: bool = False
+    adaptive_retrieval_enabled_by_default: bool = False
 
     # === Logging ===
     log_json: bool = False

@@ -113,6 +113,7 @@ class QueryRequest(BaseModel):
     enable_hyde: bool = False
     enable_crag: bool = True
     enable_self_reflective: bool = False
+    enable_adaptive_retrieval: bool = False
     top_k: int = Field(default=5, ge=1, le=50)
 
     @field_validator("question")

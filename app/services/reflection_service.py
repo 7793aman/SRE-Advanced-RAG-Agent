@@ -27,11 +27,14 @@ that failed to retrieve well the first time has no reason to retrieve
 better against unchanged chunks.
 
 `needs_retrieval` is the story 17 gate `rag_service` calls before
-retrieving at all. A classifier-call outage or malformed response
-degrades to "retrieve" — retrieving unnecessarily costs one extra search,
-while skipping a search that was actually needed risks an ungrounded
-answer, so the safer default under uncertainty is to retrieve. This
-mirrors the graceful-degradation contract crag_service, hyde_service, and
+retrieving at all, when `enable_adaptive_retrieval` is set — independently
+of `enable_self_reflective`, since "should we even search" and "was the
+answer good enough to keep" are separate decisions with no dependency on
+each other. A classifier-call outage or malformed response degrades to
+"retrieve" — retrieving unnecessarily costs one extra search, while
+skipping a search that was actually needed risks an ungrounded answer, so
+the safer default under uncertainty is to retrieve. This mirrors the
+graceful-degradation contract crag_service, hyde_service, and
 reranker_service already follow (story #18).
 """
 
