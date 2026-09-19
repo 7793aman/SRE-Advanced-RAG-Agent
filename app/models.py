@@ -188,3 +188,11 @@ class RetrievalDecision(BaseModel):
 
     needs_retrieval: bool = True
     reasoning: str = ""
+
+
+class IntentClassification(BaseModel):
+    """The intent router's classification of a question (issue #29;
+    spec.md "Router service"): which evidence family it needs."""
+
+    intent: Literal["rag", "sql", "hybrid"] = "rag"
+    reasoning: str = ""
