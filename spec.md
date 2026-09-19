@@ -165,8 +165,8 @@ artefact.
     hit/miss/set counts and hit rate, and a way to clear the cache.
 45. As an operator, I want the cache to fall back to an in-process store when Redis isn't
     configured, so that local development works without it.
-46. As an operator, I want uploaded/ingested documents de-duplicated by SHA-256 so that
-    re-ingesting a file is a no-op.
+46. As an operator, I want uploaded/ingested documents de-duplicated by source file name
+    (checked against the vector store) so that re-ingesting a file is a no-op.
 
 ### Ingestion & data
 
@@ -287,8 +287,9 @@ artefact.
 - **Security modules** — input guard, content moderation + PII redaction, input
   restructuring, output validator (schema + LLM retry), token budget (per-user-per-day
   Redis counter), spotlighting, hardened system prompt.
-- **Storage** — a byte-storage abstraction with local-filesystem and S3 backends, used by
-  the document-dedup cache.
+- **Document dedup** — before ingesting a file, ask the vector store whether it already
+  has chunks with that `source` name; if so, skip the file. No separate storage layer, no
+  S3, no file hashing: the seed corpus is static and new files get unique names.
 - **Eval** — golden schema + loader, flag profiles, a service invoker, the Ragas adapter,
   post-checks (forbidden keywords, source overlap), reporting/aggregation, and a CLI
   runner writing timestamped JSON.
@@ -304,7 +305,7 @@ artefact.
   and no answer.
 - `POST /query/sql/execute` (bearer JWT) → resumes the graph for `query_id` with
   `approved: bool`; returns the same chat-response shape.
-- `POST /documents/upload` (admin JWT) → parse, chunk, embed, index; deduped by SHA-256.
+- `POST /documents/upload` (admin JWT) → parse, chunk, embed, index; deduped by source file name.
 - `GET /admin/health` → per-dependency booleans + overall status.
 - `GET /admin/cache/stats` (admin) → per-tier hits/misses/sets/hit_rate.
 - `POST /admin/cache/clear` (admin) → clears caches.
@@ -337,7 +338,7 @@ working baseline, in roughly this order: project skeleton & config → request/r
 models → auth + rate limiting → operational-DB schema & seeding → embeddings + vector
 store + cache service → **native dense RAG end-to-end via `/query`** → hybrid search →
 reranking → HyDE → CRAG + web fallback → Self-RAG → LangGraph state machine + intent
-router → Text2SQL + human-in-the-loop approval → full multi-tier caching + dedup storage →
+router → Text2SQL + human-in-the-loop approval → full multi-tier caching + document dedup →
 the 9 security layers wired in fixed order → Ragas eval harness → Streamlit UI →
 docker-compose end-to-end + docs. `/to-tickets` will turn this into the actual tickets
 with blocking edges.
@@ -347,7 +348,6 @@ with blocking edges.
 - The eval goldens use short source filenames (`pods.html`) while ingestion records the
   full slugged name (`concepts__workloads__pods.html`) — reconcile in the eval slice.
 - The intent router carries a hard-coded hint list from an unrelated corpus — drop it.
-- The local-storage class sits in a package `__init__` — move it where it belongs.
 - `seed/docs/README.md` describes an unrelated e-commerce corpus — rewrite it for the
   Kubernetes corpus.
 - Default `search_mode` is `dense` in the schema though some docs imply `hybrid` — keep
