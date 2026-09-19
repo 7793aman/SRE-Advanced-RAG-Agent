@@ -25,7 +25,14 @@ from functools import cache, lru_cache
 from uuid import uuid4
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 from scipy.sparse import spmatrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -82,6 +89,20 @@ def upsert_chunks(chunks: list[RetrievedChunk], embeddings: list[list[float]]) -
     ]
     get_client().upsert(collection_name=settings.qdrant_collection, points=points)
     _fit_sparse_index.cache_clear()
+
+
+def source_exists(source: str) -> bool:
+    """True if the collection already holds a chunk from the file named `source`.
+    Used by ingestion to skip files it has already embedded."""
+    client = get_client()
+    if settings.qdrant_collection not in {c.name for c in client.get_collections().collections}:
+        return False
+    points, _ = client.scroll(
+        collection_name=settings.qdrant_collection,
+        scroll_filter=Filter(must=[FieldCondition(key="source", match=MatchValue(value=source))]),
+        limit=1,
+    )
+    return bool(points)
 
 
 def search(query_embedding: list[float], top_k: int = 5) -> list[RetrievedChunk]:
