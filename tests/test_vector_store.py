@@ -161,3 +161,21 @@ def test_sparse_search_finds_exact_token_dense_search_misses(qdrant_collection: 
     # finds the target doc that dense missed.
     sparse_results = sparse_search("imagePullPolicy", top_k=1)
     assert sparse_results[0].source == "target.html"
+
+
+def test_source_exists_true_only_for_ingested_file_names(qdrant_collection: str) -> None:
+    from app.services.vector_store import source_exists, upsert_chunks
+
+    upsert_chunks(
+        [RetrievedChunk(text="pods are the smallest unit", source="pods.html", page_number=None)],
+        [_unit_vector(0)],
+    )
+
+    assert source_exists("pods.html") is True
+    assert source_exists("services.html") is False
+
+
+def test_source_exists_is_false_before_the_collection_exists(qdrant_collection: str) -> None:
+    from app.services.vector_store import source_exists
+
+    assert source_exists("pods.html") is False

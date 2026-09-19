@@ -313,3 +313,48 @@ def test_execute_requires_an_explicit_approved_boolean(
     )
 
     assert resp.status_code == 422
+
+
+def test_same_query_twice_is_a_cache_hit_the_second_time(
+    client: TestClient, token: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real graph + real rag cache; only the expensive retrieve/generate step is faked."""
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from app.services import graph as graph_module
+    from app.services import rag_service
+    from app.services.query_cache_service import MemoryBackend, QueryCacheService
+
+    generations: list[str] = []
+
+    def fake_run_rag_with_trace(question: str, flags: dict[str, Any]):  # noqa: ANN202
+        generations.append(question)
+        response = ChatResponse(
+            answer="A Pod is the smallest deployable unit. [pods.html]",
+            sources=["pods.html"],
+            retrieval_score=0.9,
+            metadata=ResponseMetadata(route="rag"),
+        )
+        return response, []
+
+    compiled = graph_module.build_graph(MemorySaver())
+    monkeypatch.setattr("app.api.query.get_graph", lambda: compiled)
+    monkeypatch.setattr(graph_module, "classify_intent", lambda question: "rag")
+    monkeypatch.setattr(rag_service, "query_cache", QueryCacheService(backend=MemoryBackend()))
+    monkeypatch.setattr(rag_service, "run_rag_with_trace", fake_run_rag_with_trace)
+
+    def ask() -> dict[str, Any]:
+        resp = client.post(
+            "/query",
+            json={"question": "What is a Pod?"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        return resp.json()
+
+    first, second = ask(), ask()
+
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is True
+    assert second["answer"] == first["answer"]
+    assert generations == ["What is a Pod?"]  # the second call never re-generated

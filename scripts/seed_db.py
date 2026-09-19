@@ -195,7 +195,7 @@ def ingest_corpus(selection: CorpusSelection) -> None:
     from app.models import RetrievedChunk
     from app.services.document_processor import DocumentProcessor
     from app.services.embedding_service import embed_texts
-    from app.services.vector_store import upsert_chunks
+    from app.services.vector_store import source_exists, upsert_chunks
 
     processor = DocumentProcessor()
     ordered = [(p, "signal") for p in selection.signal]
@@ -206,9 +206,15 @@ def ingest_corpus(selection: CorpusSelection) -> None:
         len(selection.signal),
         len(selection.noise),
     )
-    ingested = failed = chunk_count = 0
+    ingested = skipped = failed = chunk_count = 0
     for idx, (path, label) in enumerate(ordered, start=1):
         try:
+            if source_exists(path.name):
+                logger.info(
+                    "[{}/{}] skip {} {} (already ingested)", idx, selection.total, label, path.name
+                )
+                skipped += 1
+                continue
             meta = processor.process_document(str(path))
             if not meta:
                 logger.warning("[{}/{}] {} {} → 0 chunks", idx, selection.total, label, path.name)
@@ -224,7 +230,13 @@ def ingest_corpus(selection: CorpusSelection) -> None:
         except Exception:  # noqa: BLE001 — one bad file must not abort the seed
             logger.exception("[{}/{}] failed {} {}", idx, selection.total, label, path.name)
             failed += 1
-    logger.info("ingestion done — {} files, {} chunks, {} failed", ingested, chunk_count, failed)
+    logger.info(
+        "ingestion done — {} files, {} chunks, {} skipped, {} failed",
+        ingested,
+        chunk_count,
+        skipped,
+        failed,
+    )
 
 
 def _parse_noise_sample(raw: str) -> int | Literal["all"]:
