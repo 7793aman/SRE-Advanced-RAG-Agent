@@ -143,6 +143,13 @@ class PendingSQLBlock(BaseModel):
     explanation: str = ""
 
 
+class SQLExecuteRequest(BaseModel):
+    """`POST /query/sql/execute` body: the human's decision on a paused query."""
+
+    query_id: str = Field(..., min_length=1, max_length=64)
+    approved: bool
+
+
 class ChatResponse(BaseModel):
     answer: str = Field(..., min_length=0)
     sources: list[str] = Field(default_factory=list)
