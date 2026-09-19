@@ -1,10 +1,12 @@
-"""HTTP seam: `POST /query`. `rag_service.run_rag` is faked, so these tests
+"""HTTP seam: `POST /query`. The compiled graph is faked, so these tests
 check the endpoint's own job only — auth enforcement and correctly translating
-the HTTP request into a call to the RAG service — without a real LLM, vector
-store, or cache.
+the HTTP request into a graph invocation — without a real LLM, vector store,
+cache, or Postgres checkpointer.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,20 +20,26 @@ def token() -> str:
     return create_access_token(user_id=1, username="agent@demo.local", is_admin=False)
 
 
+class _FakeGraph:
+    def __init__(self, calls: list[dict]) -> None:
+        self._calls = calls
+
+    def invoke(self, state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+        self._calls.append({"question": state["question"], "flags": state["flags"]})
+        return {
+            "response": ChatResponse(
+                answer="A Pod is the smallest deployable unit. [pods.html]",
+                sources=["pods.html"],
+                retrieval_score=0.9,
+                metadata=ResponseMetadata(route="rag"),
+            )
+        }
+
+
 @pytest.fixture
 def fake_run_rag(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     calls: list[dict] = []
-
-    def _run_rag(question: str, flags: dict) -> ChatResponse:
-        calls.append({"question": question, "flags": flags})
-        return ChatResponse(
-            answer="A Pod is the smallest deployable unit. [pods.html]",
-            sources=["pods.html"],
-            retrieval_score=0.9,
-            metadata=ResponseMetadata(route="rag"),
-        )
-
-    monkeypatch.setattr("app.api.query.run_rag", _run_rag)
+    monkeypatch.setattr("app.api.query.get_graph", lambda: _FakeGraph(calls))
     return calls
 
 
