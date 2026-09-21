@@ -1,14 +1,14 @@
-# Enterprise RAG — Kubernetes IT-Operations Copilot
+# Enterprise RAG: Kubernetes IT-Operations Copilot
 
 One FastAPI service that answers an SRE's plain-English questions from
-**documentation** (RAG), an **operational database** (Text2SQL), or **both** — behind a
-layered security pipeline, a multi-tier cache, and a Ragas eval harness.
+documentation (RAG), an operational database (Text2SQL), or both. It sits behind a
+layered security pipeline and a multi-tier cache, with a Ragas eval harness for testing.
 
-The document corpus is deliberately **95% noise / 5% signal** (~820 unrelated PDFs vs. 47
-real Kubernetes docs). Naïve top-k retrieval drowns in it, so every advanced technique
-here has to earn its place by rescuing signal from noise.
+The document corpus is 95% noise and 5% signal on purpose: about 820 unrelated PDFs and
+47 Kubernetes docs. Naïve top-k retrieval returns mostly noise, so each technique here
+has to show it can pull the right docs out of it.
 
-> **Status legend** used throughout: ✅ built · 🚧 planned (open GitHub issue)
+> Status legend: ✅ built, 🚧 planned (open GitHub issue)
 
 More detail: [`spec.md`](spec.md) (behaviour spec) · [`CONTEXT.md`](CONTEXT.md) (glossary) ·
 [`HANDOFF.md`](HANDOFF.md) (build plan).
@@ -68,7 +68,7 @@ flowchart TD
 
 ## 2. Advanced RAG
 
-Each technique fixes one way noise breaks naïve retrieval. All are **per-request flags**
+Each technique fixes one way noise breaks naïve retrieval. All are per-request flags
 on `POST /query`, so they can be compared and profiled by the eval harness.
 
 | Technique | Fixes | Flag | Status |
@@ -123,8 +123,8 @@ flowchart TD
     Refl -->|no| Out[Answer + sources + reflection telemetry]
 ```
 
-Everything above is wrapped in a `rag_answer` cache (key includes the flags) and degrades
-gracefully when an optional dependency or API key is missing.
+The whole path is cached in the `rag_answer` tier (the key includes the flags). If an
+optional dependency or API key is missing, that step is skipped instead of failing.
 
 ### The graph (routing + Text2SQL)
 
@@ -187,9 +187,9 @@ sequenceDiagram
 
 ## 3. Guardrails
 
-Every `/query` request goes through a **fixed-order** pipeline. The layers are numbered by
-threat model, not by execution order — the out-of-order numbers are intentional (they match
-`projectReport.pdf`). Don't renumber them.
+Every `/query` request goes through the same pipeline in a fixed order. The layer numbers
+follow the threat model, not the run order. That is intentional and matches
+`projectReport.pdf`, so don't renumber them.
 
 ```mermaid
 flowchart LR
@@ -228,8 +228,8 @@ Green = built, yellow = planned (issue #32).
 | **L9** Output validation | Malformed model output | Validate against response schema; LLM retry (max 2) | 🚧 |
 | **SQL guard** | Data damage via Text2SQL | `SELECT`-only check + keyword blocklist, plus human approval of the exact query | ✅ |
 
-**Graceful degradation:** a missing optional dependency or key (reranker, Tavily, Redis)
-degrades the feature instead of crashing the request.
+If an optional dependency or key is missing (reranker, Tavily, Redis), that feature is
+turned off and the request still completes.
 
 ---
 
@@ -253,8 +253,8 @@ queries return `cache_hit: true`. Re-ingesting a file already in the vector stor
 
 ## 5. Evals 🚧 (issue #33)
 
-The eval harness is the **regression gate for retrieval quality**. It runs the same golden
-questions under named flag profiles and proves each technique beats the naïve baseline.
+The eval harness guards retrieval quality. It runs the same golden questions under named
+flag profiles and checks that each technique scores better than the naïve baseline.
 
 ```mermaid
 flowchart TD
@@ -277,15 +277,15 @@ flowchart TD
     Report -.->|scores + trace links| LF[Langfuse dataset 🚧]
 ```
 
-**What "passing" means**
+What "passing" means:
 
 - `make eval-baseline` vs `make eval-all`: the all-techniques profile must score higher on
-  **context recall** and **faithfulness**.
-- Goldens tagged `expected_baseline: fail` must **pass** under their technique's profile.
-- Each golden is also checked for **source overlap** (did we retrieve the right file?) and
-  **forbidden keywords** (did we say something we must not?).
+  context recall and faithfulness.
+- Goldens tagged `expected_baseline: fail` must pass under their technique's profile.
+- Each golden is also checked for source overlap (did we retrieve the right file?) and
+  forbidden keywords (did we say something we must not?).
 
-**Guardrail evals (planned alongside #32):** a jailbreak / injection / PII set run through
+Guardrail evals (planned with #32): a jailbreak / injection / PII set run through
 the full pipeline, asserting each attack is blocked or redacted. The demo script (five
 representative `curl` calls plus a jailbreak) is the end-to-end acceptance test.
 
@@ -306,10 +306,10 @@ representative `curl` calls plus a jailbreak) is the end-to-end acceptance test.
 Langfuse tracing on `llm_service`, the `rag_service` entry points, and the LangGraph
 `invoke`: route, retrieved chunks, every LLM call with token usage, latency, and flags.
 
-- **No-op when unconfigured.** If `LANGFUSE_*` is unset, nothing changes and nothing crashes.
-- **Eval linkage.** Each golden run becomes a trace and the Ragas scores land on a Langfuse
+- No-op when unconfigured: if `LANGFUSE_*` is unset, nothing changes and nothing crashes.
+- Eval linkage: each golden run becomes a trace and the Ragas scores land on a Langfuse
   dataset, so a low score is one click from the trace that caused it.
-- **Redaction.** Trace payloads pass through L7 PII redaction before leaving the process.
+- Redaction: trace payloads pass through L7 PII redaction before leaving the process.
 
 ---
 
