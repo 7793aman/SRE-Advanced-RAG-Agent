@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     prompt_injection_threshold: float = 0.75
     toxicity_threshold: float = 0.75
     output_toxicity_threshold: float = 0.5
+    banned_topics: list[str] = []  # empty = no topic scan; set to enable BanTopics
     max_validation_retries: int = 2
 
     # === Retrieval defaults ===

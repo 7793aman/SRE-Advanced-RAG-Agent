@@ -18,6 +18,8 @@ from app import db
 from app.config import settings
 from app.main import app
 from app.middleware.rate_limiter import MemoryBackend, rate_limiter
+from app.security import content_guard
+from app.security.token_budget import MemoryBudgetBackend, token_budget
 
 _MIGRATION = Path(__file__).resolve().parents[1] / "seed" / "migrations" / "001_create_users.sql"
 
@@ -42,6 +44,25 @@ def _strong_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter() -> None:
     rate_limiter.reset()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _budget_uses_memory() -> None:
+    """Same reason as the limiter: never let a test touch a live Redis."""
+    token_budget._backend = MemoryBudgetBackend()
+
+
+@pytest.fixture(autouse=True)
+def _reset_token_budget() -> None:
+    token_budget.reset()
+
+
+@pytest.fixture(autouse=True)
+def _guard_models_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The llm-guard models are slow and need the network. By default the guard runs
+    its regex fallback; tests that care about the scanners patch the loaders."""
+    monkeypatch.setattr(content_guard, "_load_input_scanners", lambda: None)
+    monkeypatch.setattr(content_guard, "_load_output_scanners", lambda: None)
 
 
 @pytest.fixture(scope="session")
