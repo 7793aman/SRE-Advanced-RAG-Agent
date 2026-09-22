@@ -13,8 +13,18 @@ A resume is only accepted for a run that is actually paused at the approval
 step and was started by the same user — anything else is a 404, so a query
 can be approved once, by its owner, and its id reveals nothing to others.
 
-The other security layers (rate limiting, token budget, injection scanning,
-PII redaction, ...) are wired in by ticket #32, not here.
+`/query` runs inside the fixed-order security pipeline (ticket #32):
+
+    L1 schema+regex -> L4a JWT -> L4b rate limit -> L6 budget check -> L5 restructure
+    -> L2 guard -> L7a redact PII -> graph (L3 prompt + L8 spotlighting inside)
+    -> L7b moderate + redact -> L9 validate -> L6 consume
+
+L1 (Pydantic body validation) and L4a (the `get_current_user` dependency) are
+resolved by FastAPI before this function body runs, and FastAPI resolves
+dependencies before it reports body errors — so a request with a bad token *and*
+a malicious body gets the 401, not the 422. That reveals less to an
+unauthenticated caller, so we keep it. Everything from L4b down is in `query`
+below, in order.
 
 Known follow-up, not addressed here: every request writes a permanent
 checkpoint row under its own thread id, with nothing in this codebase to
@@ -30,11 +40,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
 from app.middleware.auth import AuthenticatedUser, get_current_user
+from app.middleware.rate_limiter import rate_limiter
 from app.models import (
     ChatResponse,
     PendingSQLBlock,
@@ -42,6 +53,11 @@ from app.models import (
     ResponseMetadata,
     SQLExecuteRequest,
 )
+from app.security.content_guard import moderate_output, scan_input
+from app.security.input_restructuring import count_tokens, restructure_input
+from app.security.output_validator import validate_output
+from app.security.pii_redaction import redact_pii
+from app.security.token_budget import token_budget
 from app.services.graph import get_graph
 
 router = APIRouter(tags=["query"])
@@ -72,13 +88,35 @@ def _to_chat_response(result: dict[str, Any]) -> ChatResponse:
     return result["response"]
 
 
+def _clean_response(response: ChatResponse) -> ChatResponse:
+    """L7b then L9: moderate and redact the answer, then check its shape."""
+    moderate_output(response.answer)
+    cleaned = response.model_copy(update={"answer": redact_pii(response.answer)})
+    return validate_output(cleaned.model_dump(mode="json"))
+
+
 @router.post("/query", response_model=ChatResponse)
 def query(body: QueryRequest, user: AuthenticatedUser = Depends(get_current_user)) -> ChatResponse:
-    result = get_graph().invoke(
-        {"question": body.question, "flags": _flags(body), "user_id": user.id},
+    if not rate_limiter.is_allowed_user(str(user.id)):  # L4b
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="rate_limit_exceeded"
+        )
+    token_budget.check(user.id)  # L6 (check)
+    question = restructure_input(body.question)  # L5
+    scan_input(question)  # L2
+    question = redact_pii(question)  # L7a
+
+    result = get_graph().invoke(  # L3 + L8 run inside the graph
+        {"question": question, "flags": _flags(body), "user_id": user.id},
         {"configurable": {"thread_id": str(uuid4())}},
     )
-    return _to_chat_response(result)
+    response = _clean_response(_to_chat_response(result))  # L7b + L9
+
+    # L6 (consume). Estimate: the question plus the answer. The graph makes several
+    # LLM calls (routing, grading, ...) whose usage it doesn't report back, so this
+    # undercounts real spend; it's a per-user bound, not an invoice.
+    token_budget.consume(user.id, count_tokens(question) + count_tokens(response.answer))
+    return response
 
 
 @router.post("/query/sql/execute", response_model=ChatResponse)
