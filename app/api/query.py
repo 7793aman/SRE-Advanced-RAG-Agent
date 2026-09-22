@@ -110,12 +110,19 @@ def query(body: QueryRequest, user: AuthenticatedUser = Depends(get_current_user
         {"question": question, "flags": _flags(body), "user_id": user.id},
         {"configurable": {"thread_id": str(uuid4())}},
     )
-    response = _clean_response(_to_chat_response(result))  # L7b + L9
+    raw_response = _to_chat_response(result)
 
-    # L6 (consume). Estimate: the question plus the answer. The graph makes several
-    # LLM calls (routing, grading, ...) whose usage it doesn't report back, so this
+    # L6 (consume) runs in `finally`: the LLM money is already spent once the graph
+    # has returned, so an answer L7b or L9 then rejects still counts against the
+    # budget. Only a pre-graph rejection (L1/L2/L4b/L6-check) is free. Charged on
+    # the raw answer, not the redacted one — redaction doesn't change token cost.
+    # Estimate: the question plus the answer. The graph makes several LLM calls
+    # (routing, grading, ...) whose usage it doesn't report back, so this
     # undercounts real spend; it's a per-user bound, not an invoice.
-    token_budget.consume(user.id, count_tokens(question) + count_tokens(response.answer))
+    try:
+        response = _clean_response(raw_response)  # L7b + L9
+    finally:
+        token_budget.consume(user.id, count_tokens(question) + count_tokens(raw_response.answer))
     return response
 
 

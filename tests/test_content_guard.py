@@ -12,6 +12,10 @@ from fastapi import HTTPException
 from app.security import content_guard
 from app.security.content_guard import moderate_output, scan_input
 
+# Captured at import time, before the autouse fixture patches the module attribute,
+# so this name always calls the real caching logic, independent of that patch.
+_real_load_input_scanners = content_guard._load_input_scanners
+
 
 def _scanners(**verdicts: bool) -> list[tuple[str, object]]:
     """`name=is_valid` pairs, in the shape `_load_*_scanners` returns."""
@@ -91,3 +95,40 @@ def test_output_passes_when_models_are_unavailable(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(content_guard, "_load_output_scanners", lambda: None)
 
     moderate_output("Restart the pod with kubectl rollout restart.")  # no error
+
+
+def test_a_transient_load_failure_is_retried_on_the_next_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(content_guard._input_scanner_cache, "_cached", None)
+    attempts = 0
+
+    def flaky_build() -> list:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("network blip")
+        return [("injection", lambda _t: True)]
+
+    monkeypatch.setattr(content_guard, "_build_input_scanners", flaky_build)
+
+    assert _real_load_input_scanners() is None  # first call: fails, nothing cached
+    assert _real_load_input_scanners() is not None  # second call: retried, succeeds
+    assert attempts == 2
+
+
+def test_a_successful_load_is_cached_and_not_rebuilt(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(content_guard._input_scanner_cache, "_cached", None)
+    builds = 0
+
+    def build() -> list:
+        nonlocal builds
+        builds += 1
+        return [("injection", lambda _t: True)]
+
+    monkeypatch.setattr(content_guard, "_build_input_scanners", build)
+
+    _real_load_input_scanners()
+    _real_load_input_scanners()
+
+    assert builds == 1

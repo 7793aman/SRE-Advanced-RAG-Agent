@@ -30,3 +30,17 @@ def test_ordinary_kubernetes_text_is_not_touched() -> None:
     raw = "Set terminationGracePeriodSeconds=30 and replicas: 3 on kube-system v1.29.4"
 
     assert redact_pii(raw) == raw
+
+
+def test_a_contiguous_digit_run_that_fails_the_luhn_check_is_left_alone() -> None:
+    # 16 digits with no card formatting and no valid checksum — e.g. a glued-together
+    # timestamp/id pair an SRE might paste, not a card number.
+    raw = "epoch 1758472800000123456789 in the trace"
+
+    assert redact_pii(raw) == raw
+
+
+def test_a_spaced_card_number_with_the_wrong_checksum_is_left_alone() -> None:
+    raw = "Card 1234 5678 9012 3456 was tried"
+
+    assert redact_pii(raw) == raw

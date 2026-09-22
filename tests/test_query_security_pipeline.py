@@ -209,3 +209,24 @@ def test_a_toxic_answer_is_blocked_by_l7b(
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "output_blocked"
+
+
+def test_tokens_are_consumed_even_when_l7b_blocks_the_answer(
+    client: TestClient,
+    headers: dict[str, str],
+    graph_calls: list,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The LLM money is already spent once the graph has run; only a pre-graph
+    rejection (L1/L2) should be free (see test_tokens_are_consumed_only_after_a_
+    successful_answer)."""
+    used: list[int] = []
+    monkeypatch.setattr(token_budget, "consume", lambda user_id, tokens: used.append(tokens))
+    monkeypatch.setattr(
+        content_guard, "_load_output_scanners", lambda: [("toxicity", lambda _t: False)]
+    )
+
+    resp = _ask(client, headers)
+
+    assert resp.status_code == 400
+    assert len(used) == 1 and used[0] > 0

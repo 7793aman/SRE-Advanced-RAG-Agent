@@ -11,20 +11,24 @@ library or a model is unavailable — or a scanner crashes mid-request — the i
 scan falls back to regex so there is always *some* guard (spec: "regex fallbacks
 when the library or a model is unavailable"). The output scan fails open in that
 case and logs, since PII redaction still runs after it.
+
+A failed load is *not* cached: a transient problem (a network blip fetching the
+model on first use) would otherwise pin the process to the regex fallback for
+its whole lifetime. Only a successful build is cached, so the next request
+retries.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from functools import lru_cache
 
 from fastapi import HTTPException, status
 from loguru import logger
 
 from app.config import settings
 
-# (name, is_valid(text)) — the shape both loaders return, so tests can fake it.
+# (name, is_valid(text)) — the shape both builders return, so tests can fake it.
 _Check = tuple[str, Callable[[str], bool]]
 
 _INPUT_ERRORS = {
@@ -47,51 +51,78 @@ _FALLBACK_INJECTION = (
 )
 
 
-@lru_cache(maxsize=1)
-def _load_input_scanners() -> list[_Check] | None:
-    try:
-        from llm_guard.input_scanners import BanTopics, PromptInjection, Toxicity
+class _RetryingCache[T]:
+    """Caches the result of a `build()` passed to `.get()`, only on success.
 
-        checks: list[_Check] = [
-            (
-                "injection",
-                _valid_of(PromptInjection(threshold=settings.prompt_injection_threshold)),
-            ),
-            ("toxicity", _valid_of(Toxicity(threshold=settings.toxicity_threshold))),
-        ]
-        if settings.banned_topics:
-            checks.append(("topics", _valid_of(BanTopics(topics=settings.banned_topics))))
-        return checks
-    except Exception:
-        logger.warning("llm-guard input scanners unavailable; using regex fallback")
-        return None
+    A raised exception logs `unavailable_msg` and returns `None`, uncached — the
+    next `.get()` calls `build()` again instead of being stuck with the failure.
+    `build` is passed in on every call, not stored, so it's resolved fresh each
+    time (lets a caller swap the builder, e.g. in tests).
+    """
 
+    def __init__(self, unavailable_msg: str) -> None:
+        self._unavailable_msg = unavailable_msg
+        self._cached: T | None = None
 
-@lru_cache(maxsize=1)
-def _load_output_scanners() -> list[_Check] | None:
-    try:
-        from llm_guard.output_scanners import BanTopics, Toxicity
-
-        checks: list[_Check] = [
-            (
-                "toxicity",
-                _valid_of_output(Toxicity(threshold=settings.output_toxicity_threshold)),
-            ),
-        ]
-        if settings.banned_topics:
-            checks.append(("topics", _valid_of_output(BanTopics(topics=settings.banned_topics))))
-        return checks
-    except Exception:
-        logger.warning("llm-guard output scanners unavailable; skipping output moderation")
-        return None
+    def get(self, build: Callable[[], T]) -> T | None:
+        if self._cached is not None:
+            return self._cached
+        try:
+            self._cached = build()
+        except Exception:
+            logger.warning(self._unavailable_msg)
+            return None
+        return self._cached
 
 
-def _valid_of(scanner) -> Callable[[str], bool]:  # noqa: ANN001 - llm-guard has no shared type
+def _as_input_check(scanner) -> Callable[[str], bool]:  # noqa: ANN001 - llm-guard has no shared type
     return lambda text: bool(scanner.scan(text)[1])
 
 
-def _valid_of_output(scanner) -> Callable[[str], bool]:  # noqa: ANN001
+def _as_output_check(scanner) -> Callable[[str], bool]:  # noqa: ANN001
     return lambda text: bool(scanner.scan("", text)[1])
+
+
+def _build_input_scanners() -> list[_Check]:
+    from llm_guard.input_scanners import BanTopics, PromptInjection, Toxicity
+
+    checks: list[_Check] = [
+        (
+            "injection",
+            _as_input_check(PromptInjection(threshold=settings.prompt_injection_threshold)),
+        ),
+        ("toxicity", _as_input_check(Toxicity(threshold=settings.toxicity_threshold))),
+    ]
+    if settings.banned_topics:
+        checks.append(("topics", _as_input_check(BanTopics(topics=settings.banned_topics))))
+    return checks
+
+
+def _build_output_scanners() -> list[_Check]:
+    from llm_guard.output_scanners import BanTopics, Toxicity
+
+    checks: list[_Check] = [
+        ("toxicity", _as_output_check(Toxicity(threshold=settings.output_toxicity_threshold))),
+    ]
+    if settings.banned_topics:
+        checks.append(("topics", _as_output_check(BanTopics(topics=settings.banned_topics))))
+    return checks
+
+
+_input_scanner_cache: _RetryingCache[list[_Check]] = _RetryingCache(
+    "llm-guard input scanners unavailable; using regex fallback"
+)
+_output_scanner_cache: _RetryingCache[list[_Check]] = _RetryingCache(
+    "llm-guard output scanners unavailable; skipping output moderation"
+)
+
+
+def _load_input_scanners() -> list[_Check] | None:
+    return _input_scanner_cache.get(_build_input_scanners)
+
+
+def _load_output_scanners() -> list[_Check] | None:
+    return _output_scanner_cache.get(_build_output_scanners)
 
 
 def _blocked(detail: str) -> HTTPException:
