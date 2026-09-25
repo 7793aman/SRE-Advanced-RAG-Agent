@@ -34,6 +34,21 @@ from app.config import settings
 
 st.set_page_config(page_title="Query Console", page_icon="🛰️", layout="wide")
 
+# Reading text (the actual questions and answers) gets Anthropic's serif,
+# same as claude.ai's own message text — everything else (buttons, labels,
+# captions) stays the sans set globally via .streamlit/config.toml's `font`.
+_THEME_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap');
+
+[data-testid="stChatMessageContent"] p {
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 1.05rem;
+    line-height: 1.65;
+}
+</style>
+"""
+
 _API = settings.streamlit_api_base_url
 
 # `st.session_state` is tied to the browser tab's live connection — a reload
@@ -172,7 +187,8 @@ def render_auth_gate() -> None:
             max-width: 420px;
             margin: 8vh auto 0;
             padding: 2.5rem 2rem 2rem;
-            border: 1px solid rgba(242, 239, 231, 0.14);
+            background-color: #F4F3EE;
+            border: 1px solid #E4E2DB;
             border-radius: 12px;
         }
         </style>
@@ -183,7 +199,7 @@ def render_auth_gate() -> None:
         st.markdown(
             "<div style='text-align:center; font-size:2.75rem; line-height:1;'>🛰️</div>"
             "<h1 style='text-align:center; margin:0.5rem 0 0;'>Query Console</h1>"
-            "<p style='text-align:center; color:var(--text-color-secondary, #9c9a91); "
+            "<p style='text-align:center; color:#87867F; "
             "margin:0.35rem 0 1.5rem;'>Sign in to ask the Kubernetes ops assistant "
             "a question.</p>",
             unsafe_allow_html=True,
@@ -456,6 +472,7 @@ def render_composer() -> None:
 
 
 def main() -> None:
+    st.markdown(_THEME_CSS, unsafe_allow_html=True)
     st.session_state.setdefault("token", None)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("messages", [])

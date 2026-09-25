@@ -1,13 +1,39 @@
-# Issue #34's "Claude Dark" theme: warm dark grey (not near-black), one
-# terracotta accent reserved for interactive elements. See spec.md's
-# "Demo UI (issue #34)" section for the full design writeup.
+# claude.ai's own chat-UI light theme, not the (much warmer) anthropic.com
+# marketing palette: the main panel is near-white, and the faint warm cream
+# ("Pampas") is reserved for the sidebar and other recessed surfaces — Clay
+# stays a sparse accent on primary buttons/links, not a background color.
+# Hairline borders + a small corner radius stand in for elevation instead of
+# drop shadows. See spec.md's "Demo UI (issue #34)" section.
 [theme]
-base = "dark"
-primaryColor = "#E58762"
-backgroundColor = "#1F1E1B"
-secondaryBackgroundColor = "#26251F"
-textColor = "#F2EFE7"
-font = "sans serif"
+base = "light"
+primaryColor = "#D97757"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F4F3EE"
+textColor = "#1F1E1D"
+borderColor = "#E4E2DB"
+linkColor = "#D97757"
+linkUnderline = false
+codeBackgroundColor = "#F4F3EE"
+codeTextColor = "#1F1E1D"
+# Public Sans for every heading and every piece of UI chrome (buttons,
+# labels, captions) — Anthropic's own headlines/labels/UI are sans, inverted
+# from the usual convention. The reading text (chat questions/answers) gets
+# a serif instead, scoped in scripts/streamlit_app.py, since that split
+# needs finer targeting than Streamlit's heading/body theme keys allow.
+font = "'Public Sans':https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap"
+baseRadius = "small"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# The sidebar is the one place that keeps the faint warm cream tint; its own
+# inner widgets (selectbox, number_input) get white so they read as insets
+# against it rather than disappearing into it.
+[theme.sidebar]
+backgroundColor = "#F4F3EE"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1F1E1D"
+borderColor = "#E4E2DB"
+primaryColor = "#D97757"
 
 [server]
 headless = true
