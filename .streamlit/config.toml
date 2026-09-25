@@ -1,12 +1,17 @@
-# "Arctic reflection" theme: dark navy base (replaces "Opaline" after it
-# read as too bright), a lighter steel-blue-grey sidebar, a mid steel-blue
-# accent, and near-white text. Full reskin again, not a tweak — see
-# spec.md's "Demo UI (issue #34)" section for the writeup.
+# "Arctic reflection" theme, v2: dark navy page, near-white "card" surfaces
+# (sidebar, expander, pending-SQL card, auth card) with dark text — v1 used
+# a mid steel-blue-grey for every surface, which (combined with the navy
+# page and blue accent) read as uniformly blue with nothing to anchor real
+# readability. This palette has no neutral grey at all, so "less blue"
+# meant giving surfaces to the one genuinely near-white swatch instead.
+# secondaryBackgroundColor alone can't make card TEXT dark — Streamlit only
+# has one global textColor — so scripts/streamlit_app.py adds scoped CSS
+# for that. See spec.md's "Demo UI (issue #34)" section for the writeup.
 [theme]
 base = "dark"
 primaryColor = "#5289AD"
 backgroundColor = "#243C4C"
-secondaryBackgroundColor = "#698696"
+secondaryBackgroundColor = "#F4FCFB"
 textColor = "#F4FCFB"
 font = "sans serif"
 

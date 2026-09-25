@@ -333,24 +333,41 @@ own ticket (issue #54, blocked by #33) and is still unspecified there.
   to idiomatic Streamlit (`st.sidebar` + `st.chat_message`), and keeps retrieval controls
   visible instead of hidden behind a settings icon. Transcript entries are a flat,
   rule-delineated log/timeline style, not chat bubbles.
-- **Theme — "Arctic reflection": dark navy base, light by neither by default.** Third
-  full theme in this demo UI's history, each one a wholesale replacement of the last, not
-  a tweak (background/text/borders/accent all swapped together every time, so no prior
-  palette lingers half-applied): "Claude Dark" (warm dark grey, terracotta accent) →
-  "Opaline" (near-white, coral accent) — reverted after live use read as too bright →
-  "Arctic reflection" (current). Base is dark navy `#243C4C` (page/content), with a
-  visibly lighter steel-blue-grey `#698696` for "surface" elements (sidebar, input
-  widgets, the inspector expander) — a deliberate two-tone hierarchy, not a mismatch:
-  every "raised" surface uses the same lighter tone, so it reads as one consistent
-  design language rather than an accident. Text is near-white `#F4FCFB` (body) /
-  `#ACBCBF` (secondary/caption, also the translucent card-border colour), and the single
-  accent is a mid steel blue `#5289AD` (buttons, active tab, progress-bar fill) — same
-  "one accent reserved for interactive elements, nothing else uses it" rule every theme
-  here has kept. Code/SQL blocks still stay dark regardless of the surrounding theme
-  (kept across all three themes now — a real signature at this point, not incidental).
-  Semantic colours (amber/red/green for pending/reject/approve) are still untouched —
-  Streamlit's own built-in alert colors, orthogonal to this custom 5-token palette, not
-  part of any of the three themes.
+- **Theme — "Arctic reflection", v2: dark page, near-white "card" surfaces with dark
+  text.** Third full theme in this demo UI's history, each a wholesale replacement of
+  the last, not a tweak: "Claude Dark" (warm dark grey, terracotta accent) → "Opaline"
+  (near-white, coral accent) — reverted after live use read as too bright → "Arctic
+  reflection" v1 (dark navy page, a mid steel-blue-grey `#698696` for every surface —
+  sidebar, expander, inputs) — revised to v2 after v1 *also* read as "too blue":
+  correct as far as it went (genuinely darker than Opaline), but this palette has no
+  neutral grey at all, so leaning on `#698696` for every raised surface still left
+  nothing on screen that wasn't some shade of blue. v2's fix: give the one genuinely
+  near-white swatch (`#F4FCFB`) to "card" surfaces instead — the sidebar, the
+  pending-SQL card (a new bordered `st.container`, where it used to render inline in
+  the dark chat bubble), and the inspector expander — dark navy `#243C4C` text on
+  them, while the page/chat-transcript stays dark navy with near-white text. This is
+  *not* achievable through Streamlit's theme config alone (`secondaryBackgroundColor`
+  drives the native sidebar/input/expander backgrounds, but Streamlit only exposes one
+  *global* text color) — `scripts/streamlit_app.py`'s `_SURFACE_CSS` constant carries
+  the scoped text-color overrides this needs, built by inspecting Streamlit's actual
+  rendered DOM live (`data-testid` attributes, not the `data-baseweb` ones an earlier
+  pass guessed and got wrong) rather than assumed from documentation. Three real
+  rendering bugs surfaced and got fixed *while building this*, worth recording since
+  they're the kind of thing that silently recurs in Streamlit theming work: (1) widgets
+  Streamlit renders with the *opposite* surface's color for contrast (the search-mode
+  selectbox, the top_k number input, a secondary button) went dark-text-on-dark once
+  their surrounding surface flipped to white — fixed by forcing their own background
+  white too, not just their text; (2) an unchecked toggle's track/thumb are Streamlit's
+  own text color at ~20% opacity, invisible once text color is near-white on an
+  also-near-white surface; (3) `st.expander`'s container renders fully *transparent* by
+  default in this Streamlit version — not secondaryBackgroundColor, not anything —  so
+  every "invisible text in the inspector" symptom traced back to one missing rule, not
+  a text-color problem at all. `st.code` and `st.json` both still keep their own fixed
+  dark syntax-highlighted rendering regardless of the surrounding theme, same as every
+  theme before this one. The single accent (`#5289AD`, steel blue) and the "one accent,
+  nothing else uses it" rule are unchanged from v1. Semantic colours (amber/red/green
+  for pending/reject/approve) remain Streamlit's own built-in alert colors, orthogonal
+  to this custom palette, not part of any theme here.
 - **Response rendering differs by `metadata.route`**, using a glyph instead of a text
   badge as the primary signal (shape encodes state, not just colour): `●` filled =
   single-source resolved answer (`rag`, `sql`), `◐` half-filled = `hybrid` (merged

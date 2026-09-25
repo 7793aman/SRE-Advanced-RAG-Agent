@@ -60,6 +60,98 @@ _PRESETS = [
     "Show P1 incidents on prod-us-east and the fix for each alert type",
 ]
 
+# "Arctic reflection" v2: the sidebar, the inspector expander, and the
+# pending-SQL card (see `render_pending_sql`) are near-white surfaces
+# (`secondaryBackgroundColor` in .streamlit/config.toml) sitting on the dark
+# navy page. Streamlit only exposes one *global* text color, so without
+# this, near-white `textColor` text would render on those near-white
+# surfaces too. Deliberately not a blanket `*` selector: `st.code` and
+# `st.json` do their own internal syntax-highlighting with their own
+# `<span>` colors, which a blanket rule would flatten — these selectors
+# only reach the plain markdown/label/button text around them, not into
+# either component.
+_SURFACE_CSS = """
+<style>
+[data-testid="stSidebar"],
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"],
+[data-testid="stSidebar"] button,
+[data-testid="stExpander"],
+[data-testid="stExpander"] p,
+[data-testid="stExpander"] label,
+[data-testid="stExpander"] span,
+[data-testid="stExpander"] div[data-testid="stMarkdownContainer"],
+[data-testid="stExpander"] [data-testid="stTab"],
+[data-testid="stExpander"] [data-testid="stTab"] *,
+[class*="st-key-pending_sql_card_"] div[data-testid="stMarkdownContainer"],
+[class*="st-key-pending_sql_card_"] label,
+[class*="st-key-pending_sql_card_"] button {
+    color: #243C4C !important;
+}
+input, textarea {
+    color: #243C4C !important;
+    border: 1px solid #698696 !important;
+}
+input::placeholder, textarea::placeholder {
+    color: #698696 !important;
+}
+[class*="st-key-pending_sql_card_"] {
+    background: #F4FCFB;
+    border: 1px solid #ACBCBF;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+}
+/* Same issue as the selectbox/number_input below: a secondary button
+   (Reject) in the main content area defaults to a dark background for
+   contrast against the dark page — invisible once its text is forced dark
+   navy by the rule above. The primary button (Approve & run) is unaffected;
+   it already gets a solid primaryColor fill regardless of surface. */
+[class*="st-key-pending_sql_card_"] button[kind="secondary"] {
+    background-color: #F4FCFB !important;
+    border: 1px solid #698696 !important;
+}
+/* The expander container itself — header AND body — renders fully
+   transparent by default, showing the dark page straight through it. This
+   was the real bug behind every "invisible text in the inspector" symptom:
+   the dark-navy text forced above was correctly dark-on-white in every
+   inspection, but with no background of its own, the expander actually
+   sat on the dark page, making it dark-on-dark. This one rule is the fix;
+   the (still-transparent) elements inside it show this through. */
+[data-testid="stExpander"] {
+    background-color: #F4FCFB !important;
+    border-radius: 12px;
+}
+/* The selectbox/number_input widgets Streamlit renders *inside* the now-
+   white sidebar still use `backgroundColor` (the dark page color, chosen
+   for contrast against the sidebar's own native background) for their own
+   inner box — before this override that left dark navy text (forced above)
+   sitting on a dark navy box, invisible. Force those specific boxes white
+   too so they read as part of the same white sidebar surface. */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div:has(> input),
+[data-testid="stSidebar"] [data-testid="stNumberInputContainer"] {
+    background-color: #F4FCFB !important;
+    border: 1px solid #698696 !important;
+}
+/* An unchecked toggle's track/thumb are Streamlit's own textColor at low
+   opacity — a near-white track/thumb at ~20% opacity is invisible against
+   a near-white sidebar (it was only ever visible against a dark surface).
+   Only the *unchecked* state needs this; the checked state already renders
+   as a solid primaryColor fill, which is visible regardless of surface. */
+[data-testid="stCheckbox"] label:has(input:not(:checked)) span + div {
+    background-color: #ACBCBF !important;
+}
+[data-testid="stCheckbox"] label:has(input:not(:checked)) span + div > div {
+    background-color: #F4FCFB !important;
+    border: 1px solid #698696 !important;
+}
+</style>
+"""
+
 # route -> (glyph, label). ● = single-source resolved, ◐ = hybrid (merged
 # sources), ○ = unresolved/awaiting approval, ✕ = the SQL path didn't
 # complete. Unknown routes fall back to a plain label in `_route_status`.
@@ -172,8 +264,16 @@ def render_auth_gate() -> None:
             max-width: 420px;
             margin: 8vh auto 0;
             padding: 2.5rem 2rem 2rem;
-            border: 1px solid rgba(172, 188, 191, 0.25);
+            background: #F4FCFB;
+            border: 1px solid #ACBCBF;
             border-radius: 12px;
+        }
+        .st-key-auth_card h1,
+        .st-key-auth_card label,
+        .st-key-auth_card button,
+        .st-key-auth_card [data-testid="stTab"],
+        .st-key-auth_card [data-testid="stTab"] * {
+            color: #243C4C !important;
         }
         </style>
         """,
@@ -182,8 +282,8 @@ def render_auth_gate() -> None:
     with st.container(key="auth_card"):
         st.markdown(
             "<div style='text-align:center; font-size:2.75rem; line-height:1;'>🛰️</div>"
-            "<h1 style='text-align:center; margin:0.5rem 0 0;'>Query Console</h1>"
-            "<p style='text-align:center; color:#ACBCBF; "
+            "<h1 style='text-align:center; margin:0.5rem 0 0; color:#243C4C;'>Query Console</h1>"
+            "<p style='text-align:center; color:#698696; "
             "margin:0.35rem 0 1.5rem;'>Sign in to ask the Kubernetes ops assistant "
             "a question.</p>",
             unsafe_allow_html=True,
@@ -307,41 +407,45 @@ def _resolve_sql(index: int, entry: dict[str, Any], query_id: str, approved: boo
 
 
 def render_pending_sql(index: int, entry: dict[str, Any], pending: dict[str, Any]) -> None:
-    st.write(pending["explanation"])
-    st.code(pending["sql"], language="sql")
-    # `st.columns` always splits the row into equal-width tracks and a button
-    # doesn't stretch to fill its track, so any fixed ratio still leaves each
-    # button sitting at the *left* of its own too-wide track — which reads as
-    # mismatched sizes with a gap between them, worse the wider the chat
-    # bubble is. Scoping this row's columns to shrink to their buttons'
-    # actual content width (instead of splitting available space) is what
-    # actually puts them flush next to each other.
-    st.markdown(
-        """
-        <style>
-        [class*="st-key-sql_actions_"] [data-testid="stHorizontalBlock"] {
-            width: fit-content;
-            gap: 0.6rem;
-        }
-        [class*="st-key-sql_actions_"] [data-testid="stColumn"] {
-            width: fit-content !important;
-            flex: none !important;
-            min-width: 0 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    # A near-white card (see `_SURFACE_CSS`) floating in the dark assistant
+    # bubble — this action needs a human decision, so it gets its own
+    # visually distinct surface rather than blending into the transcript.
     # Keyed per query, not a shared literal key — two pending-SQL turns
     # showing at once would otherwise collide on the same container key.
-    with st.container(key=f"sql_actions_{pending['query_id']}"):
-        approve_col, reject_col = st.columns(2)
-        if approve_col.button(
-            "Approve & run", key=f"approve_{pending['query_id']}", type="primary"
-        ):
-            _resolve_sql(index, entry, pending["query_id"], approved=True)
-        if reject_col.button("Reject", key=f"reject_{pending['query_id']}"):
-            _resolve_sql(index, entry, pending["query_id"], approved=False)
+    with st.container(key=f"pending_sql_card_{pending['query_id']}"):
+        st.write(pending["explanation"])
+        st.code(pending["sql"], language="sql")
+        # `st.columns` always splits the row into equal-width tracks and a
+        # button doesn't stretch to fill its track, so any fixed ratio still
+        # leaves each button sitting at the *left* of its own too-wide track
+        # — which reads as mismatched sizes with a gap between them, worse
+        # the wider the card is. Scoping this row's columns to shrink to
+        # their buttons' actual content width (instead of splitting
+        # available space) is what actually puts them flush together.
+        st.markdown(
+            """
+            <style>
+            [class*="st-key-sql_actions_"] [data-testid="stHorizontalBlock"] {
+                width: fit-content;
+                gap: 0.6rem;
+            }
+            [class*="st-key-sql_actions_"] [data-testid="stColumn"] {
+                width: fit-content !important;
+                flex: none !important;
+                min-width: 0 !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.container(key=f"sql_actions_{pending['query_id']}"):
+            approve_col, reject_col = st.columns(2)
+            if approve_col.button(
+                "Approve & run", key=f"approve_{pending['query_id']}", type="primary"
+            ):
+                _resolve_sql(index, entry, pending["query_id"], approved=True)
+            if reject_col.button("Reject", key=f"reject_{pending['query_id']}"):
+                _resolve_sql(index, entry, pending["query_id"], approved=False)
 
 
 def render_response(index: int, entry: dict[str, Any]) -> None:
@@ -465,6 +569,7 @@ def render_composer() -> None:
 
 
 def main() -> None:
+    st.markdown(_SURFACE_CSS, unsafe_allow_html=True)
     st.session_state.setdefault("token", None)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("messages", [])
