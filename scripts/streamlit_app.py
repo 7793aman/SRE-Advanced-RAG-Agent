@@ -9,12 +9,16 @@ The layout (persistent sidebar + transcript), the theme, the route-glyph
 system, the inspector, and the flag-disabling rule are design decisions
 recorded in spec.md's "Demo UI (issue #34)" section, made from throwaway HTML
 prototypes — this file is the real implementation of that decision, not a
-port of the prototype's code. One adaptation from the prototype: entries
+port of the prototype's code. Two adaptations from the prototype: entries
 render as Streamlit's native `st.chat_message` bubbles rather than the
 prototype's flat log-entry style, and presets ask their question immediately
 on click rather than only prefilling it — both are Streamlit-idiomatic
 choices that keep this maintainable rather than fighting the framework for
-pixel parity with a throwaway mockup.
+pixel parity with a throwaway mockup. The inspector itself is a persistent
+right-hand column (`st.columns`, not a real slide-over — Streamlit has no
+such component) showing whichever resolved answer was last clicked, rather
+than the prototype's per-message inline expander, to actually deliver on
+spec.md's "dedicated inspector, not inline."
 """
 
 from __future__ import annotations
@@ -223,51 +227,30 @@ def _route_status(route: str) -> str:
     return f"{glyph} {label}"
 
 
-def _resolve_sql(entry: dict[str, Any], query_id: str, approved: bool) -> None:
+def _resolve_sql(index: int, entry: dict[str, Any], query_id: str, approved: bool) -> None:
     result = api_post("/query/sql/execute", {"query_id": query_id, "approved": approved})
     if result is None:
         return
     entry["response"] = result
+    # A rejected/refused/errored resolution still isn't "pending" any more —
+    # it's a resolved (if unhappy) turn, so it becomes inspectable like any
+    # other resolved answer instead of leaving the panel on stale content.
+    if not result.get("pending_sql"):
+        st.session_state.inspecting_index = index
     st.rerun()
 
 
-def render_pending_sql(entry: dict[str, Any], pending: dict[str, Any]) -> None:
+def render_pending_sql(index: int, entry: dict[str, Any], pending: dict[str, Any]) -> None:
     st.write(pending["explanation"])
     st.code(pending["sql"], language="sql")
     approve_col, reject_col = st.columns(2)
     if approve_col.button("Approve & run", key=f"approve_{pending['query_id']}", type="primary"):
-        _resolve_sql(entry, pending["query_id"], approved=True)
+        _resolve_sql(index, entry, pending["query_id"], approved=True)
     if reject_col.button("Reject", key=f"reject_{pending['query_id']}"):
-        _resolve_sql(entry, pending["query_id"], approved=False)
+        _resolve_sql(index, entry, pending["query_id"], approved=False)
 
 
-def render_inspector(response: dict[str, Any]) -> None:
-    metadata = response["metadata"]
-    with st.expander("Inspect response"):
-        formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
-        with formatted_tab:
-            st.write(f"**Cache:** {'hit' if response['cache_hit'] else 'miss'}")
-            reflection_note = f"{metadata['reflection_iterations']} iteration(s)"
-            if metadata.get("reflection_score") is not None:
-                reflection_note += f", score {metadata['reflection_score']:.2f}"
-            st.write(f"**Reflection:** {reflection_note}")
-
-            chunks = metadata.get("retrieved_chunks", [])
-            if not chunks:
-                st.caption("No chunks retrieved for this turn.")
-            for chunk in chunks:
-                st.progress(
-                    _clamped(chunk["score"]), text=f"{chunk['source']} — {chunk['score']:.2f}"
-                )
-                # Retrieved chunk text is arbitrary corpus content, not
-                # markdown we wrote — st.caption/st.write would parse a
-                # stray "#" as a heading. st.text renders it literally.
-                st.text(chunk["text"])
-        with raw_tab:
-            st.json(response)
-
-
-def render_response(entry: dict[str, Any]) -> None:
+def render_response(index: int, entry: dict[str, Any]) -> None:
     response = entry["response"]
     metadata = response["metadata"]
     pending = response.get("pending_sql")
@@ -275,7 +258,7 @@ def render_response(entry: dict[str, Any]) -> None:
     st.caption(_route_status(metadata["route"]))
 
     if pending:
-        render_pending_sql(entry, pending)
+        render_pending_sql(index, entry, pending)
         return
 
     st.write(response["answer"])
@@ -301,7 +284,56 @@ def render_response(entry: dict[str, Any]) -> None:
             ]
             st.caption(", ".join(tags))
 
-    render_inspector(response)
+    is_showing = st.session_state.get("inspecting_index") == index
+    if st.button(
+        "Showing in inspector →" if is_showing else "Inspect response",
+        key=f"inspect_{index}",
+        disabled=is_showing,
+    ):
+        st.session_state.inspecting_index = index
+        st.rerun()
+
+
+# --- inspector: persistent right-hand column ------------------------------
+
+
+def render_inspector_panel() -> None:
+    """spec.md: "Debug/raw detail lives in a dedicated inspector, not
+    inline." Streamlit has no real slide-over, so this is a persistent
+    column showing whichever resolved answer was last clicked — always
+    visible, never inline in the transcript."""
+    st.subheader("Inspect response")
+
+    index = st.session_state.get("inspecting_index")
+    messages = st.session_state.messages
+    if index is None or index >= len(messages) or messages[index]["response"].get("pending_sql"):
+        st.caption("Click “Inspect response” on an answer to see its detail here.")
+        return
+
+    entry = messages[index]
+    response = entry["response"]
+    metadata = response["metadata"]
+
+    st.caption(f"“{entry['question']}”")
+    formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
+    with formatted_tab:
+        st.write(f"**Cache:** {'hit' if response['cache_hit'] else 'miss'}")
+        reflection_note = f"{metadata['reflection_iterations']} iteration(s)"
+        if metadata.get("reflection_score") is not None:
+            reflection_note += f", score {metadata['reflection_score']:.2f}"
+        st.write(f"**Reflection:** {reflection_note}")
+
+        chunks = metadata.get("retrieved_chunks", [])
+        if not chunks:
+            st.caption("No chunks retrieved for this turn.")
+        for chunk in chunks:
+            st.progress(_clamped(chunk["score"]), text=f"{chunk['source']} — {chunk['score']:.2f}")
+            # Retrieved chunk text is arbitrary corpus content, not markdown
+            # we wrote — st.caption/st.write would parse a stray "#" as a
+            # heading. st.text renders it literally.
+            st.text(chunk["text"])
+    with raw_tab:
+        st.json(response)
 
 
 # --- transcript + composer -----------------------------------------------------
@@ -315,14 +347,19 @@ def send_question(question: str) -> None:
     if response is None:
         return
     st.session_state.messages.append({"question": question, "response": response})
+    # A resolved answer becomes the inspector's default content — a pending
+    # SQL turn has nothing inspectable yet, so the panel keeps showing
+    # whatever was selected before (or the empty-state prompt).
+    if not response.get("pending_sql"):
+        st.session_state.inspecting_index = len(st.session_state.messages) - 1
 
 
 def render_transcript() -> None:
-    for entry in st.session_state.messages:
+    for index, entry in enumerate(st.session_state.messages):
         with st.chat_message("user"):
             st.write(entry["question"])
         with st.chat_message("assistant"):
-            render_response(entry)
+            render_response(index, entry)
 
 
 def render_composer() -> None:
@@ -339,6 +376,7 @@ def main() -> None:
     st.session_state.setdefault("token", None)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("messages", [])
+    st.session_state.setdefault("inspecting_index", None)
 
     if not st.session_state.token:
         render_auth_gate()
@@ -347,8 +385,13 @@ def main() -> None:
     render_sidebar()
     st.title("Query Console")
     st.caption("Ask about your clusters, or approve a generated query.")
-    render_transcript()
-    render_composer()
+
+    transcript_col, inspector_col = st.columns([2.5, 1], gap="large")
+    with transcript_col:
+        render_transcript()
+        render_composer()
+    with inspector_col:
+        render_inspector_panel()
 
 
 if __name__ == "__main__":

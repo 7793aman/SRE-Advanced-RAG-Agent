@@ -352,10 +352,17 @@ own ticket (issue #54, blocked by #33) and is still unspecified there.
   relevance-score meter, and source tags prefixed `[doc]` / `[sql]` so origin is visible
   at a glance without opening anything.
 - **Debug/raw detail lives in a dedicated inspector, not inline.** Every resolved answer
-  has an "Inspect response" action that opens a slide-over panel with a
-  Formatted/Raw JSON toggle — formatted shows retrieval score, cache status, reflection
-  info, and each retrieved chunk's source/score/text with a score meter; raw shows the
-  literal `ChatResponse` JSON. Keeps the transcript itself scannable while still exposing
+  has an "Inspect response" action; clicking it shows that answer's detail — a
+  Formatted/Raw JSON toggle — in a **persistent right-hand column**, not inline in the
+  transcript. (First built as a per-message `st.expander`, which put the detail back
+  inline and defeated the point — corrected after review while testing issue #34.
+  Streamlit has no real slide-over/drawer component, so a persistent column is the
+  actual implementation, not literally a sliding panel.) Formatted shows retrieval
+  score, cache status, reflection info, and each retrieved chunk's source/score/text
+  with a score meter; raw shows the literal `ChatResponse` JSON. The column defaults to
+  the most recently resolved answer and keeps showing it until another "Inspect
+  response" is clicked; a pending SQL turn has no such action since there's nothing
+  resolved yet to inspect. Keeps the transcript itself scannable while still exposing
   everything `ResponseMetadata` carries, for users who want to audit an answer.
 - **Flag-disabling logic** (the result of an explicit code audit — see issue #34 comments
   for the full flag × intent liveness table): only **one** conflict is knowable
