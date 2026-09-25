@@ -63,6 +63,27 @@ def test_high_score_keeps_the_chunks_unchanged_and_never_calls_web_search(
     assert result.used_web_fallback is False
 
 
+def test_the_grading_itself_is_attached_to_the_result_not_just_logged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """evaluate_and_correct used to compute a real relevance_score/label and
+    only log it (`logger.info(...)`), throwing it away before it could ever
+    reach a caller — so nothing outside the server logs could see why a
+    correction did or didn't fire. Every branch (correct/ambiguous/incorrect)
+    must attach the same CRAGEvaluation the threshold decision was made from."""
+    from app.services import crag_service
+
+    monkeypatch.setattr(
+        crag_service, "generate_json", lambda *a, **k: _grade_response(0.9, "correct")
+    )
+
+    result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
+
+    assert result.evaluation is not None
+    assert result.evaluation.relevance_score == pytest.approx(0.9)
+    assert result.evaluation.relevance_label == "correct"
+
+
 def test_low_score_below_ambiguous_threshold_discards_the_corpus_for_web_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

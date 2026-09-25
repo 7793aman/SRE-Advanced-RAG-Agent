@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.models import CRAGCorrection, ReflectionResult, RetrievedChunk
+from app.models import CRAGCorrection, CRAGEvaluation, ReflectionResult, RetrievedChunk
 from app.services.llm_service import LLMResponse
 from app.services.query_cache_service import MemoryBackend, QueryCacheService
 
@@ -470,6 +470,39 @@ def test_used_web_fallback_defaults_to_false_without_a_correction(
     response, _ = run_rag_with_trace("What is a Pod?", _FLAGS)
 
     assert response.metadata.used_web_fallback is False
+
+
+def test_crag_evaluation_surfaces_on_the_response_metadata(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CRAG's own grading used to be computed, logged, then thrown away —
+    never reaching the API response, so nothing outside the server logs
+    could see why a web-fallback correction did or didn't fire."""
+    from app.services.rag_service import run_rag_with_trace
+
+    evaluation = CRAGEvaluation(
+        relevance_score=0.55, relevance_label="ambiguous", confidence=0.8, reasoning="partial match"
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.evaluate_and_correct",
+        lambda question, chunks, top_k=5: CRAGCorrection(
+            chunks=chunks, used_web_fallback=True, evaluation=evaluation
+        ),
+    )
+
+    response, _ = run_rag_with_trace("What is a Pod?", _FLAGS)
+
+    assert response.metadata.crag_evaluation == evaluation
+
+
+def test_crag_evaluation_is_none_when_crag_is_disabled(
+    fresh_cache, fake_search, fake_embed, fake_generate
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    response, _ = run_rag_with_trace("What is a Pod?", {**_FLAGS, "enable_crag": False})
+
+    assert response.metadata.crag_evaluation is None
 
 
 def test_web_fallback_on_a_later_reflection_retry_still_reports_true(

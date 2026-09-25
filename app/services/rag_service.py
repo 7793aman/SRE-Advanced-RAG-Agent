@@ -62,7 +62,13 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import settings
-from app.models import ChatResponse, ResponseMetadata, RetrievedChunk, RetrievedChunkPreview
+from app.models import (
+    ChatResponse,
+    CRAGEvaluation,
+    ResponseMetadata,
+    RetrievedChunk,
+    RetrievedChunkPreview,
+)
 from app.security.spotlighting import spotlight_chunks
 from app.security.system_prompt import GENERAL_KNOWLEDGE_SYSTEM_PROMPT, SYSTEM_PROMPT
 from app.services.crag_service import evaluate_and_correct
@@ -100,10 +106,11 @@ def _sources(chunks: list[RetrievedChunk]) -> list[str]:
 
 def _retrieve(
     question: str, query_vector: list[float], flags: dict[str, Any]
-) -> tuple[list[RetrievedChunk], bool]:
-    """Returns the chunks plus whether CRAG's web fallback actually
-    contributed to them (issue #34's `ResponseMetadata.used_web_fallback`).
-    False whenever `enable_crag` is off — there's no correction to report."""
+) -> tuple[list[RetrievedChunk], bool, CRAGEvaluation | None]:
+    """Returns the chunks, whether CRAG's web fallback actually contributed
+    to them (issue #34's `ResponseMetadata.used_web_fallback`), and CRAG's
+    own grading (`None` whenever `enable_crag` is off — there's nothing to
+    report)."""
     top_k = int(flags.get("top_k", 5))
     search_mode = flags.get("search_mode", "dense")
     enable_rerank = flags.get("enable_rerank", False)
@@ -129,20 +136,22 @@ def _retrieve(
     chunks = chunks[:top_k]
 
     used_web_fallback = False
+    crag_evaluation: CRAGEvaluation | None = None
     if enable_crag:
         correction = evaluate_and_correct(question, chunks, top_k=top_k)
         chunks, used_web_fallback = correction.chunks, correction.used_web_fallback
+        crag_evaluation = correction.evaluation
 
-    return chunks, used_web_fallback
+    return chunks, used_web_fallback, crag_evaluation
 
 
 def _retrieve_and_generate(
     question: str, flags: dict[str, Any]
-) -> tuple[list[RetrievedChunk], LLMResponse, bool]:
+) -> tuple[list[RetrievedChunk], LLMResponse, bool, CRAGEvaluation | None]:
     query_vector = embed_texts([question])[0]
-    chunks, used_web_fallback = _retrieve(question, query_vector, flags)
+    chunks, used_web_fallback, crag_evaluation = _retrieve(question, query_vector, flags)
     llm_response = generate_text(_build_prompt(question, chunks), system_prompt=SYSTEM_PROMPT)
-    return chunks, llm_response, used_web_fallback
+    return chunks, llm_response, used_web_fallback, crag_evaluation
 
 
 def run_rag_with_trace(
@@ -158,6 +167,7 @@ def run_rag_with_trace(
     skip_retrieval = enable_adaptive_retrieval and not needs_retrieval(question)
 
     used_web_fallback = False
+    crag_evaluation: CRAGEvaluation | None = None
 
     if skip_retrieval:
         route = "rag_general_knowledge"
@@ -165,7 +175,9 @@ def run_rag_with_trace(
         llm_response = generate_text(question, system_prompt=GENERAL_KNOWLEDGE_SYSTEM_PROMPT)
     else:
         route = "rag"
-        chunks, llm_response, used_web_fallback = _retrieve_and_generate(question, flags)
+        chunks, llm_response, used_web_fallback, crag_evaluation = _retrieve_and_generate(
+            question, flags
+        )
 
     reflection_iterations = 0
     reflection_score: float | None = None
@@ -186,12 +198,16 @@ def run_rag_with_trace(
                     refined_question, system_prompt=GENERAL_KNOWLEDGE_SYSTEM_PROMPT
                 )
             else:
-                chunks, llm_response, retry_web_fallback = _retrieve_and_generate(
+                chunks, llm_response, retry_web_fallback, crag_evaluation = _retrieve_and_generate(
                     refined_question, flags
                 )
                 # Once any attempt (initial or a retry) actually used a web
                 # correction, that stays true for the whole run — a later
                 # retry not needing it doesn't retroactively un-happen it.
+                # crag_evaluation, unlike that flag, isn't accumulated — it
+                # just reflects the grading for whichever chunks are
+                # actually being used now, same as `chunks` itself getting
+                # overwritten each retry rather than appended to.
                 used_web_fallback = used_web_fallback or retry_web_fallback
             reflection = reflect(question, llm_response.text, chunks)
             reflection_score = reflection.reflection_score
@@ -214,6 +230,7 @@ def run_rag_with_trace(
             reflection_score=reflection_score,
             refined_question=refined_question,
             used_web_fallback=used_web_fallback,
+            crag_evaluation=crag_evaluation,
         ),
     )
     return response, chunks

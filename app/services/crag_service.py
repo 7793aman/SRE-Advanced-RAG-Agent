@@ -125,7 +125,7 @@ def evaluate_and_correct(
     )
 
     if evaluation.relevance_score >= settings.crag_relevance_threshold:
-        return CRAGCorrection(chunks=chunks, used_web_fallback=False)
+        return CRAGCorrection(chunks=chunks, used_web_fallback=False, evaluation=evaluation)
 
     try:
         web_chunks = web_search(question, max_results=top_k)
@@ -133,13 +133,13 @@ def evaluate_and_correct(
         logger.warning(
             "CRAG wanted a web fallback but Tavily is unconfigured; keeping corpus chunks as-is"
         )
-        return CRAGCorrection(chunks=chunks, used_web_fallback=False)
+        return CRAGCorrection(chunks=chunks, used_web_fallback=False, evaluation=evaluation)
     except Exception:  # noqa: BLE001 — a Tavily outage degrades to the corpus, never fails the request
         logger.warning("Tavily web search failed; keeping corpus chunks as-is")
-        return CRAGCorrection(chunks=chunks, used_web_fallback=False)
+        return CRAGCorrection(chunks=chunks, used_web_fallback=False, evaluation=evaluation)
 
     if evaluation.relevance_score >= settings.crag_ambiguous_threshold:
         combined = chunks + web_chunks
-        return CRAGCorrection(chunks=combined[:top_k], used_web_fallback=True)
+        return CRAGCorrection(chunks=combined[:top_k], used_web_fallback=True, evaluation=evaluation)
 
-    return CRAGCorrection(chunks=web_chunks[:top_k], used_web_fallback=True)
+    return CRAGCorrection(chunks=web_chunks[:top_k], used_web_fallback=True, evaluation=evaluation)

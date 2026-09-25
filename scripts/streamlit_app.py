@@ -389,6 +389,15 @@ def render_response(index: int, entry: dict[str, Any]) -> None:
                 reflection_note += f", score {metadata['reflection_score']:.2f}"
             st.write(f"**Reflection:** {reflection_note}")
 
+            crag = metadata.get("crag_evaluation")
+            if crag is not None:
+                st.write(
+                    f"**CRAG grade:** {crag['relevance_score']:.2f} ({crag['relevance_label']}) "
+                    f"— {crag['reasoning']}"
+                )
+            else:
+                st.write("**CRAG grade:** not graded (CRAG was off, or nothing was retrieved)")
+
             chunks = metadata.get("retrieved_chunks", [])
             if not chunks:
                 st.caption("No chunks retrieved for this turn.")

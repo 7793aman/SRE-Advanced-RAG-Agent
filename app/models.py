@@ -128,6 +128,13 @@ class RetrievedChunkPreview(BaseModel):
     score: float = 0.0
 
 
+class CRAGEvaluation(BaseModel):
+    relevance_score: float = 0.0
+    relevance_label: str = ""
+    confidence: float = 0.0
+    reasoning: str = ""
+
+
 class ResponseMetadata(BaseModel):
     route: str = "rag"
     retrieved_chunks: list[RetrievedChunkPreview] = Field(default_factory=list)
@@ -143,6 +150,14 @@ class ResponseMetadata(BaseModel):
     # graceful degradation (Tavily unconfigured/failed) that kept the corpus
     # chunks unchanged.
     used_web_fallback: bool = False
+    # None when CRAG never ran at all (enable_crag off, a SQL-only route, or
+    # adaptive retrieval skipped the corpus entirely) — distinct from a real
+    # grade, so the UI can tell "not graded" apart from "graded and scored
+    # low". Previously this whole evaluation was computed then thrown away
+    # after only being logged server-side (crag_service.py) — never reaching
+    # the API response at all, so nothing outside the server logs could ever
+    # see *why* a web-fallback correction did or didn't fire.
+    crag_evaluation: CRAGEvaluation | None = None
 
 
 class PendingSQLBlock(BaseModel):
@@ -181,13 +196,6 @@ class RetrievedChunk(BaseModel):
     page_number: int | None = None
 
 
-class CRAGEvaluation(BaseModel):
-    relevance_score: float = 0.0
-    relevance_label: str = ""
-    confidence: float = 0.0
-    reasoning: str = ""
-
-
 class CRAGCorrection(BaseModel):
     """`evaluate_and_correct`'s return value: the (possibly corrected) chunks,
     plus whether Tavily web results actually made it into that list — the
@@ -197,6 +205,7 @@ class CRAGCorrection(BaseModel):
 
     chunks: list[RetrievedChunk]
     used_web_fallback: bool = False
+    evaluation: CRAGEvaluation | None = None
 
 
 class ReflectionResult(BaseModel):
