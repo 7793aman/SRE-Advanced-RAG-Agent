@@ -394,6 +394,13 @@ def render_transcript() -> None:
 
 
 def render_composer() -> None:
+    # Streamlit only docks `st.chat_input` to the bottom of the viewport
+    # (the ChatGPT/Claude-style "input stays put, transcript scrolls"
+    # behavior) when it's called at the top level — nested inside
+    # `st.columns`/`st.container`, as it used to be here, it just renders
+    # inline instead and scrolls away with the rest of the page. `main()`
+    # calls this outside the transcript/inspector columns so it gets that
+    # native docking back.
     question = st.chat_input("Ask about your clusters…")
     if question:
         send_question(question)
@@ -440,9 +447,9 @@ def main() -> None:
         transcript_col, inspector_col = st.columns([1.6, 1], gap="large")
         with transcript_col:
             render_transcript()
-            render_composer()
         with inspector_col:
             render_inspector_panel()
+    render_composer()
 
 
 if __name__ == "__main__":
