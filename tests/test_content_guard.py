@@ -6,6 +6,9 @@ the regex fallback the spec asks for is exercised for real.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 from fastapi import HTTPException
 
@@ -132,3 +135,48 @@ def test_a_successful_load_is_cached_and_not_rebuilt(monkeypatch: pytest.MonkeyP
     _real_load_input_scanners()
 
     assert builds == 1
+
+
+def test_concurrent_scans_never_overlap_and_build_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: two requests racing into a cold cache used to both call
+    `build()` at once — harmless with a fake, but a real deadlock against
+    llm-guard's MPS-backed models (found testing issue #34's demo UI). This
+    can't reproduce the MPS deadlock itself (no real model here), but it does
+    prove `_mps_lock` actually serializes concurrent callers rather than
+    letting them interleave, which is the property that fix depends on."""
+    monkeypatch.setattr(content_guard, "_load_input_scanners", _real_load_input_scanners)
+    monkeypatch.setattr(content_guard._input_scanner_cache, "_cached", None)
+
+    builds = 0
+    in_flight = 0
+    max_in_flight = 0
+    lock = threading.Lock()
+
+    def build() -> list:
+        nonlocal builds
+        with lock:
+            builds += 1
+        time.sleep(0.05)  # widen the race window a real concurrent build would hit
+        return [("injection", is_valid)]
+
+    def is_valid(_text: str) -> bool:
+        nonlocal in_flight, max_in_flight
+        with lock:
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+        time.sleep(0.05)
+        with lock:
+            in_flight -= 1
+        return True
+
+    monkeypatch.setattr(content_guard, "_build_input_scanners", build)
+
+    threads = [threading.Thread(target=scan_input, args=("safe question",)) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert all(not t.is_alive() for t in threads)
+    assert builds == 1
+    assert max_in_flight == 1

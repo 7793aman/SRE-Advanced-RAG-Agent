@@ -21,6 +21,7 @@ retries.
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Callable
 
 from fastapi import HTTPException, status
@@ -30,6 +31,19 @@ from app.config import settings
 
 # (name, is_valid(text)) — the shape both builders return, so tests can fake it.
 _Check = tuple[str, Callable[[str], bool]]
+
+# Guards every use of the llm-guard models below — building *and* running
+# inference on them. Apple's MPS backend (what these models load onto on
+# Apple Silicon, per `device=device(type='mps')` in their own logs) isn't
+# safe for concurrent access from multiple threads: two requests racing into
+# a `.scan()` call at once — not just two racing into the first build — was
+# enough to deadlock the process. FastAPI gives each sync request its own
+# thread, so this is one lock shared by input and output scanning alike,
+# serializing GPU access instead of parallelizing it. Correctness over
+# throughput: a demo/ops tool answering one question at a time is not
+# throughput-sensitive, and a wrong answer (or a hung process) is worse than
+# a queued one.
+_mps_lock = threading.Lock()
 
 _INPUT_ERRORS = {
     "injection": "injection_blocked",
@@ -58,6 +72,15 @@ class _RetryingCache[T]:
     next `.get()` calls `build()` again instead of being stuck with the failure.
     `build` is passed in on every call, not stored, so it's resolved fresh each
     time (lets a caller swap the builder, e.g. in tests).
+
+    `build()` loads ML models onto an accelerator (MPS on Apple Silicon, seen
+    in practice) whose backend isn't safe for concurrent access — two
+    requests racing in before the first `.get()` finishes both saw an empty
+    cache and both called `build()` at once, deadlocking the process instead
+    of just wasting one load. `.get()` is called under `_mps_lock` (see
+    `scan_input`/`moderate_output`), which also serializes every later
+    inference call on the same models, so the lock here just re-checks the
+    cache under that same lock rather than opening a second race.
     """
 
     def __init__(self, unavailable_msg: str) -> None:
@@ -134,30 +157,32 @@ def _regex_injection(text: str) -> bool:
 
 
 def scan_input(text: str) -> None:
-    scanners = _load_input_scanners()
-    if scanners is not None:
-        try:
-            for name, is_valid in scanners:
-                if not is_valid(text):
-                    raise _blocked(_INPUT_ERRORS[name])
-            return
-        except HTTPException:
-            raise
-        except Exception:
-            logger.exception("llm-guard input scan crashed; using regex fallback")
+    with _mps_lock:
+        scanners = _load_input_scanners()
+        if scanners is not None:
+            try:
+                for name, is_valid in scanners:
+                    if not is_valid(text):
+                        raise _blocked(_INPUT_ERRORS[name])
+                return
+            except HTTPException:
+                raise
+            except Exception:
+                logger.exception("llm-guard input scan crashed; using regex fallback")
     if _regex_injection(text):
         raise _blocked(_INPUT_ERRORS["injection"])
 
 
 def moderate_output(text: str) -> None:
-    scanners = _load_output_scanners()
-    if scanners is None:
-        return
-    try:
-        for _name, is_valid in scanners:
-            if not is_valid(text):
-                raise _blocked("output_blocked")
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("llm-guard output scan crashed; skipping output moderation")
+    with _mps_lock:
+        scanners = _load_output_scanners()
+        if scanners is None:
+            return
+        try:
+            for _name, is_valid in scanners:
+                if not is_valid(text):
+                    raise _blocked("output_blocked")
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("llm-guard output scan crashed; skipping output moderation")
