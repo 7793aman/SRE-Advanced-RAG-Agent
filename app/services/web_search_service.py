@@ -15,21 +15,24 @@ prompt-building, and source citation downstream all work unchanged.
 
 from __future__ import annotations
 
-from functools import lru_cache
-
 from tavily import TavilyClient
 
 from app.config import settings
 from app.models import RetrievedChunk
+from app.services.lazy_singleton import LazySingleton
 
 
 class WebSearchUnconfiguredError(RuntimeError):
     """Raised when `web_search` is called without `TAVILY_API_KEY` set."""
 
 
-@lru_cache(maxsize=1)
+_client: LazySingleton[TavilyClient] = LazySingleton(
+    lambda: TavilyClient(api_key=settings.tavily_api_key)
+)
+
+
 def _get_client() -> TavilyClient:
-    return TavilyClient(api_key=settings.tavily_api_key)
+    return _client.get()
 
 
 def web_search(query: str, max_results: int = 5) -> list[RetrievedChunk]:

@@ -18,6 +18,7 @@ local dev and tests.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Protocol
@@ -38,22 +39,35 @@ class _CounterBackend(Protocol):
 
 
 class MemoryBudgetBackend:
-    """In-process counter stand-in. TTL is a no-op."""
+    """In-process counter stand-in. TTL is a no-op.
+
+    `incrby` is a read-modify-write on a plain dict — FastAPI runs concurrent
+    requests in a thread pool, so two users' (or the same user's two
+    in-flight requests') `consume()` calls racing here can lose an update,
+    same class of bug as `content_guard.py`'s fixed deadlock and
+    `rate_limiter.py`'s already-locked equivalent (this mirrors that lock).
+    No real impact when Upstash is configured (Redis `INCRBY` is atomic) —
+    this only matters for a local/test run with no Redis.
+    """
 
     def __init__(self) -> None:
         self._counts: dict[str, int] = {}
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> int:
-        return self._counts.get(key, 0)
+        with self._lock:
+            return self._counts.get(key, 0)
 
     def incrby(self, key: str, amount: int) -> None:
-        self._counts[key] = self._counts.get(key, 0) + amount
+        with self._lock:
+            self._counts[key] = self._counts.get(key, 0) + amount
 
     def expire(self, key: str, seconds: int) -> None:  # noqa: ARG002
         return
 
     def clear(self) -> None:
-        self._counts.clear()
+        with self._lock:
+            self._counts.clear()
 
 
 class _UpstashBudgetBackend:

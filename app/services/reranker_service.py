@@ -13,21 +13,20 @@ request.
 
 from __future__ import annotations
 
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from app.config import settings
 from app.models import RetrievedChunk
+from app.services.lazy_singleton import LazySingleton
 
 if TYPE_CHECKING:
     import voyageai
     from sentence_transformers import CrossEncoder
 
 
-@lru_cache(maxsize=1)
-def _get_local_model() -> CrossEncoder:
+def _build_local_model() -> CrossEncoder:
     # Imported lazily: sentence-transformers pulls in torch, which is slow to
     # import and unneeded in any process that never actually reranks.
     from sentence_transformers import CrossEncoder
@@ -35,11 +34,28 @@ def _get_local_model() -> CrossEncoder:
     return CrossEncoder(settings.reranker_model)
 
 
-@lru_cache(maxsize=1)
-def _get_voyage_client() -> voyageai.Client:
+# Two requests racing into a cold cache used to both build this model at
+# once — harmless on CPU, but a real deadlock on Apple's MPS backend (same
+# failure content_guard.py hit, see issue #34's demo-UI testing). LazySingleton
+# serializes the first build instead of racing it.
+_local_model: LazySingleton[CrossEncoder] = LazySingleton(_build_local_model)
+
+
+def _get_local_model() -> CrossEncoder:
+    return _local_model.get()
+
+
+def _build_voyage_client() -> voyageai.Client:
     import voyageai
 
     return voyageai.Client(api_key=settings.voyage_api_key)
+
+
+_voyage_client: LazySingleton[voyageai.Client] = LazySingleton(_build_voyage_client)
+
+
+def _get_voyage_client() -> voyageai.Client:
+    return _voyage_client.get()
 
 
 def _score_local(question: str, texts: list[str]) -> list[float]:

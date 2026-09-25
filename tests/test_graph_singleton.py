@@ -39,10 +39,10 @@ class _FakeCheckpointerCM:
 
 @pytest.fixture(autouse=True)
 def _reset_graph_singleton() -> Iterator[None]:
-    graph_module.get_graph.cache_clear()
+    graph_module._graph_singleton.reset()
     graph_module._checkpointer_cm = None
     yield
-    graph_module.get_graph.cache_clear()
+    graph_module._graph_singleton.reset()
     graph_module._checkpointer_cm = None
 
 

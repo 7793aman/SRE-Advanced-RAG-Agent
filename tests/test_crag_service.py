@@ -265,23 +265,30 @@ def test_unconfigured_web_search_on_empty_retrieval_degrades_to_an_empty_list(
     assert result.used_web_fallback is False
 
 
-# --- malformed grader output: treat as incorrect, don't crash --------------
+# --- malformed grader output: degrade like a call failure, don't crash -----
 
 
-def test_malformed_grader_json_treats_retrieval_as_incorrect(
+def test_malformed_grader_json_keeps_retrieval_as_is(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Same degradation as a grader call failure: a broken judge isn't
+    evidence the retrieval is bad, so this must NOT force a web fallback on
+    perfectly good chunks (regression: it used to return "incorrect" here,
+    contradicting the module's own documented contract)."""
     from app.services import crag_service
+
+    def _boom(*args: object, **kwargs: object) -> list:
+        raise AssertionError("malformed grader JSON must not trigger a web search")
 
     monkeypatch.setattr(
         crag_service, "generate_json", lambda *a, **k: LLMResponse(text="not valid json")
     )
-    monkeypatch.setattr(crag_service, "web_search", lambda *a, **k: list(_WEB_CHUNKS))
+    monkeypatch.setattr(crag_service, "web_search", _boom)
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result.chunks == _WEB_CHUNKS
-    assert result.used_web_fallback is True
+    assert result.chunks == _CHUNKS
+    assert result.used_web_fallback is False
 
 
 # --- the grading prompt -----------------------------------------------------

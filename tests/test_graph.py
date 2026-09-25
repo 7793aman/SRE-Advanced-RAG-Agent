@@ -77,9 +77,9 @@ def sql_env(monkeypatch: pytest.MonkeyPatch) -> dict:
         ),
     )
 
-    def _execute(sql: str) -> list[dict]:
+    def _execute(sql: str) -> tuple[list[dict], bool]:
         env["executed"].append(sql)
-        return env["rows"]
+        return env["rows"], env.get("cache_hit", False)
 
     def _generate_text(prompt: str, system_prompt: str | None = None, **_: object) -> LLMResponse:
         env["answer_prompts"].append(prompt)
@@ -143,6 +143,24 @@ def test_approving_runs_the_sql_and_answers_from_the_rows(
     assert response.metadata.route == "sql"
     assert "prod-eu" in sql_env["answer_prompts"][0]
     assert "Which cluster had the most P1 incidents?" in sql_env["answer_prompts"][0]
+
+
+def test_sql_route_reports_a_real_cache_hit_not_always_false(
+    compiled_graph, monkeypatch: pytest.MonkeyPatch, sql_env: dict
+) -> None:
+    """Regression: `ChatResponse.cache_hit` on the SQL route used to always
+    be False, even when `execute_sql` served the rows from its own cache —
+    nothing surfaced that fact up to the response, so the UI's "Cache:
+    hit/miss" line was silently wrong (found testing issue #34's demo UI)."""
+    sql_env["cache_hit"] = True
+    monkeypatch.setattr(graph_module, "classify_intent", lambda question: "sql")
+    _pending(_invoke(compiled_graph, "Which cluster had the most P1 incidents?"))
+
+    result = _resume(compiled_graph, approved=True)
+
+    response = result["response"]
+    assert response.cache_hit is True
+    assert response.metadata.cache_hit is True
 
 
 def test_rejecting_ends_with_a_clear_message_and_runs_nothing(
@@ -235,6 +253,28 @@ def test_hybrid_intent_synthesises_rows_and_docs_into_one_answer(
     prompt = sql_env["answer_prompts"][0]
     assert "prod-eu" in prompt, "the SQL rows must reach the synthesis prompt"
     assert "Restart the pod. [runbook.html]" in prompt, "the doc answer must reach it too"
+
+
+def test_hybrid_route_cache_hit_is_true_if_either_sub_call_was_cached(
+    compiled_graph, monkeypatch: pytest.MonkeyPatch, sql_env: dict
+) -> None:
+    """Regression: a hybrid answer used to just inherit whichever cache_hit
+    the RAG draft happened to carry, silently ignoring the SQL half's own
+    cache tier entirely (found testing issue #34's demo UI)."""
+    sql_env["cache_hit"] = True
+    monkeypatch.setattr(graph_module, "classify_intent", lambda question: "hybrid")
+    monkeypatch.setattr(
+        graph_module,
+        "run_rag",
+        lambda question, flags: _rag_response(answer="Restart the pod. [runbook.html]"),
+    )
+    _pending(_invoke(compiled_graph, "list P1 incidents with remediation docs"))
+
+    result = _resume(compiled_graph, approved=True)
+
+    response = result["response"]
+    assert response.cache_hit is True
+    assert response.metadata.cache_hit is True
 
 
 def test_hybrid_rejection_still_ends_with_the_rejection_message(

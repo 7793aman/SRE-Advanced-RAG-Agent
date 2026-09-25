@@ -20,6 +20,14 @@ def cache() -> QueryCacheService:
     return QueryCacheService(backend=MemoryBackend())
 
 
+@pytest.fixture
+def shared_backend() -> MemoryBackend:
+    """A backend outliving any single `QueryCacheService` instance — stands
+    in for Upstash surviving a process restart, unlike `cache`'s backend
+    which is fresh per test."""
+    return MemoryBackend()
+
+
 # --- key derivation ----------------------------------------------------------
 
 
@@ -142,6 +150,26 @@ def test_clear_evicts_every_tier_and_resets_stats(cache: QueryCacheService) -> N
 
     assert cache.get_embedding("a", _MODEL) is None
     assert cache.get_intent("q") is None
+
+
+def test_clear_evicts_entries_written_by_an_earlier_process(shared_backend: MemoryBackend) -> None:
+    """Regression: `clear()` used to delete only keys its OWN in-process
+    bookkeeping remembered writing — against the real (Upstash, persistent
+    across restarts) backend, that missed every key a previous process
+    instance had written, so `clear()` reported success but left stale
+    entries in place indefinitely. A fresh `QueryCacheService` (simulating a
+    server restart) must still be able to clear entries an earlier instance
+    wrote to the same backend, which means `clear()` has to scan the backend
+    itself rather than trust any in-process record of past writes."""
+    earlier_process = QueryCacheService(backend=shared_backend)
+    earlier_process.set_sql_result("SELECT 1", [{"a": 1}])
+
+    restarted_process = QueryCacheService(backend=shared_backend)
+    assert restarted_process.get_sql_result("SELECT 1") is not None  # sanity: it's really there
+
+    restarted_process.clear()
+
+    assert restarted_process.get_sql_result("SELECT 1") is None
 
 
 # --- ping() ------------------------------------------------------------------

@@ -209,9 +209,10 @@ def test_execute_sql_returns_serialised_rows(monkeypatch: pytest.MonkeyPatch) ->
         [{"n": Decimal("2.50"), "at": datetime(2026, 1, 2, 3, 4, tzinfo=UTC), "name": "prod"}],
     )
 
-    rows = sql_service.execute_sql("SELECT 1")
+    rows, cache_hit = sql_service.execute_sql("SELECT 1")
 
     assert rows == [{"n": 2.5, "at": "2026-01-02T03:04:00+00:00", "name": "prod"}]
+    assert cache_hit is False
     json.dumps(rows)  # must be JSON-safe: it is checkpointed and cached
 
 
@@ -239,7 +240,8 @@ def test_execute_sql_runs_read_only_with_a_timeout(monkeypatch: pytest.MonkeyPat
 def test_execute_sql_caps_the_row_count(monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_db(monkeypatch, [{"i": i} for i in range(sql_service.MAX_ROWS + 50)])
 
-    assert len(sql_service.execute_sql("SELECT i FROM t")) == sql_service.MAX_ROWS
+    rows, _ = sql_service.execute_sql("SELECT i FROM t")
+    assert len(rows) == sql_service.MAX_ROWS
 
 
 def test_execute_sql_wraps_database_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,12 +259,18 @@ def test_execute_sql_wraps_database_errors(monkeypatch: pytest.MonkeyPatch) -> N
 def test_execute_sql_results_are_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     executed = _fake_db(monkeypatch, [{"n": 1}])
 
-    first = sql_service.execute_sql("SELECT 1")
+    first_rows, first_cache_hit = sql_service.execute_sql("SELECT 1")
     executed.clear()
-    second = sql_service.execute_sql("select   1")
+    second_rows, second_cache_hit = sql_service.execute_sql("select   1")
 
-    assert second == first
+    assert second_rows == first_rows
     assert executed == []
+    # The cache-hit flag itself (issue #34: this used to never surface up to
+    # `ChatResponse.cache_hit`, so the UI's "Cache: hit/miss" line was wrong
+    # for every SQL-path answer) — first call is a fresh execution, the
+    # normalised-identical second call must report the cache hit honestly.
+    assert first_cache_hit is False
+    assert second_cache_hit is True
 
 
 # --- schema introspection (live Postgres) ------------------------------------------
@@ -294,7 +302,7 @@ def test_get_schema_hides_the_users_table(live_db: None) -> None:
 
 
 def test_a_real_select_runs_against_the_seeded_database(live_db: None) -> None:
-    rows = sql_service.execute_sql(
+    rows, _ = sql_service.execute_sql(
         "SELECT cluster_id, count(*) AS n FROM incidents WHERE severity = 'P1' "
         "GROUP BY cluster_id ORDER BY n DESC LIMIT 1"
     )

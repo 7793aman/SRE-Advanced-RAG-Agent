@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import json
 import sys
-from functools import lru_cache
 from typing import Any, TypedDict
 
 from langchain_core.runnables import RunnableConfig
@@ -57,6 +56,7 @@ from langgraph.types import interrupt
 from app.config import settings
 from app.models import ChatResponse, ResponseMetadata
 from app.security.system_prompt import SQL_ANSWER_SYSTEM_PROMPT
+from app.services.lazy_singleton import LazySingleton
 from app.services.llm_service import generate_text
 from app.services.rag_service import run_rag
 from app.services.router_service import classify_intent
@@ -84,6 +84,7 @@ class GraphState(TypedDict, total=False):
     sql: str
     sql_explanation: str
     rows: list[dict[str, Any]]
+    sql_cache_hit: bool
     # Set by any SQL-path node that ends the run early with its own `response`.
     halted: bool
     response: ChatResponse
@@ -139,7 +140,8 @@ def request_sql_approval(state: GraphState, config: RunnableConfig) -> dict[str,
 
 def execute_sql_node(state: GraphState) -> dict[str, Any]:
     try:
-        return {"rows": execute_sql(state["sql"])}
+        rows, cache_hit = execute_sql(state["sql"])
+        return {"rows": rows, "sql_cache_hit": cache_hit}
     except (SQLExecutionError, UnsafeSQLError) as exc:
         return _halt(f"The approved query couldn't be run: {exc}", "sql_error")
 
@@ -168,17 +170,33 @@ def generate_answer(state: GraphState) -> dict[str, Any]:
         return {}
 
     answer = generate_text(_synthesis_prompt(state), system_prompt=SQL_ANSWER_SYSTEM_PROMPT).text
+    # `cache_hit` used to always end up False here regardless of whether
+    # `execute_sql` actually served the rows from its own `sql_result`
+    # cache tier — nothing surfaced that fact up to the response, so the
+    # UI's "Cache: hit/miss" line was silently wrong for every SQL-path (and
+    # hybrid) answer. A hybrid answer combines two sub-calls with their own
+    # cache tiers (the RAG draft, the SQL rows), so it's a hit if *either*
+    # one was — not just whichever the base `ChatResponse` happened to carry.
+    sql_cache_hit = state.get("sql_cache_hit", False)
     if state["intent"] == "hybrid":
         rag = state["response"]
+        cache_hit = sql_cache_hit or rag.cache_hit
         response = rag.model_copy(
             update={
                 "answer": answer,
-                "metadata": rag.metadata.model_copy(update={"route": "hybrid"}),
+                "cache_hit": cache_hit,
+                "metadata": rag.metadata.model_copy(
+                    update={"route": "hybrid", "cache_hit": cache_hit}
+                ),
             }
         )
     else:
         response = ChatResponse(
-            answer=answer, sources=[], retrieval_score=0.0, metadata=ResponseMetadata(route="sql")
+            answer=answer,
+            sources=[],
+            retrieval_score=0.0,
+            cache_hit=sql_cache_hit,
+            metadata=ResponseMetadata(route="sql", cache_hit=sql_cache_hit),
         )
     return {"response": response}
 
@@ -229,11 +247,10 @@ def build_graph(checkpointer: BaseCheckpointSaver) -> CompiledStateGraph:
     return builder.compile(checkpointer=checkpointer)
 
 
-@lru_cache(maxsize=1)
-def get_graph() -> CompiledStateGraph:
-    """The production singleton: compiled once, against a live Postgres
-    checkpointer, the first time it's called. Never opened per-request —
-    it's a process-lifetime singleton, same as `llm_service._get_client()`'s
+def _build_graph_singleton() -> CompiledStateGraph:
+    """Compiled once, against a live Postgres checkpointer, the first time
+    `get_graph()` is called. Never opened per-request — it's a
+    process-lifetime singleton, same as `llm_service._get_client()`'s
     OpenAI client.
 
     `from_conn_string` is a `@contextmanager`, not a plain constructor: its
@@ -243,13 +260,16 @@ def get_graph() -> CompiledStateGraph:
     garbage-collected immediately, which closes the connection out from
     under the checkpointer on its very first real use.
 
-    `lru_cache` doesn't cache exceptions, so a `checkpointer.setup()`
-    failure (e.g. a transient DB blip) leaves this function free to run
-    again on the next call. The module-level reference is only assigned
-    *after* `setup()` succeeds, and a failed attempt explicitly closes its
-    own connection first — otherwise every retry during an outage would
-    open one more live connection with nothing left to ever close it,
-    leaking connections until the pool is exhausted.
+    `LazySingleton` doesn't cache exceptions, so a `checkpointer.setup()`
+    failure (e.g. a transient DB blip) leaves this free to run again on the
+    next call — and, unlike the `lru_cache` this replaced, serializes
+    concurrent first calls instead of letting two threads each open their
+    own Postgres connection and race `setup()`, silently leaking whichever
+    one loses. The module-level reference is only assigned *after* `setup()`
+    succeeds, and a failed attempt explicitly closes its own connection
+    first — otherwise every retry during an outage would open one more live
+    connection with nothing left to ever close it, leaking connections until
+    the pool is exhausted.
     """
     from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -264,3 +284,10 @@ def get_graph() -> CompiledStateGraph:
     global _checkpointer_cm
     _checkpointer_cm = checkpointer_cm
     return build_graph(checkpointer)
+
+
+_graph_singleton: LazySingleton[CompiledStateGraph] = LazySingleton(_build_graph_singleton)
+
+
+def get_graph() -> CompiledStateGraph:
+    return _graph_singleton.get()
