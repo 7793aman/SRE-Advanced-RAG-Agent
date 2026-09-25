@@ -386,12 +386,32 @@ def main() -> None:
     st.title("Query Console")
     st.caption("Ask about your clusters, or approve a generated query.")
 
-    transcript_col, inspector_col = st.columns([1.6, 1], gap="large")
-    with transcript_col:
-        render_transcript()
-        render_composer()
-    with inspector_col:
-        render_inspector_panel()
+    # The sidebar gets its visual separation for free (Streamlit gives it its
+    # own themed background); these two plain `st.columns` don't, so without
+    # this they just look like one wide area with some empty space in the
+    # middle. `key=` on the wrapping container gives Streamlit's own
+    # generated class (`st-key-query_panes`) to scope the border to only
+    # this column pair — a bare `[data-testid="stColumn"]` selector would
+    # also catch the unrelated Approve/Reject button columns inside a
+    # pending-SQL card.
+    st.markdown(
+        """
+        <style>
+        .st-key-query_panes [data-testid="stColumn"]:last-of-type {
+            border-left: 1px solid rgba(242, 239, 231, 0.16);
+            padding-left: 2rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="query_panes"):
+        transcript_col, inspector_col = st.columns([1.6, 1], gap="large")
+        with transcript_col:
+            render_transcript()
+            render_composer()
+        with inspector_col:
+            render_inspector_panel()
 
 
 if __name__ == "__main__":
