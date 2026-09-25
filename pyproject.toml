@@ -72,12 +72,13 @@ dev = [
     "ruff>=0.7.0",
     "mypy>=1.13.0",
     "types-pyyaml>=6.0",
+    "types-requests>=2.32.0",
 ]
 # Declared + pinned now; installed by their own slices to keep `--extra dev` lean.
 # eval harness — ticket #33 pins the exact ragas/langchain combination it needs.
 eval = ["ragas>=0.2.0"]
 # demo UI — ticket #34.
-ui = ["streamlit>=1.40.0"]
+ui = ["streamlit>=1.40.0", "requests>=2.32.0"]
 
 [tool.ruff]
 line-length = 100

@@ -15,6 +15,11 @@ threshold can), then acts on `config.py`'s two thresholds:
   score < crag_ambiguous_threshold    -> incorrect: discard the corpus,
                                           answer from web results only
 
+Only the ambiguous and incorrect branches set `used_web_fallback=True` on the
+returned `CRAGCorrection` — the "correct" branch and every graceful
+degradation below return the original chunks unchanged, so they're not a web
+fallback even though the code path passed through this function.
+
 An empty `chunks` list has nothing to grade, so it skips the LLM call
 entirely and goes straight to the web fallback (an automatic "incorrect").
 
@@ -36,7 +41,7 @@ from loguru import logger
 from pydantic import ValidationError
 
 from app.config import settings
-from app.models import CRAGEvaluation, RetrievedChunk
+from app.models import CRAGCorrection, CRAGEvaluation, RetrievedChunk
 from app.services.chunk_formatting import format_chunks
 from app.services.llm_service import generate_json
 from app.services.web_search_service import WebSearchUnconfiguredError, web_search
@@ -89,7 +94,7 @@ def _grade(question: str, chunks: list[RetrievedChunk]) -> CRAGEvaluation:
 
 def evaluate_and_correct(
     question: str, chunks: list[RetrievedChunk], top_k: int = 5
-) -> list[RetrievedChunk]:
+) -> CRAGCorrection:
     """Grade `chunks` for relevance to `question`; below the relevance
     threshold, correct with a Tavily web search. Always logs the grade.
 
@@ -97,7 +102,12 @@ def evaluate_and_correct(
     own `top_k`) — it bounds how many web results are requested and how many
     chunks a correction returns, so a corrected answer doesn't silently fall
     back to Tavily's own default result count regardless of what was asked
-    for."""
+    for.
+
+    Returns a `CRAGCorrection`, not a bare chunk list (issue #34): callers
+    need to know whether web results actually made it into the returned
+    chunks, so the UI can label a web-corrected answer distinctly from a
+    normal corpus answer instead of both silently looking the same."""
     evaluation = _grade(question, chunks)
     logger.info(
         "CRAG grade {:.2f} ({}) for question={!r}: {}",
@@ -108,7 +118,7 @@ def evaluate_and_correct(
     )
 
     if evaluation.relevance_score >= settings.crag_relevance_threshold:
-        return chunks
+        return CRAGCorrection(chunks=chunks, used_web_fallback=False)
 
     try:
         web_chunks = web_search(question, max_results=top_k)
@@ -116,13 +126,13 @@ def evaluate_and_correct(
         logger.warning(
             "CRAG wanted a web fallback but Tavily is unconfigured; keeping corpus chunks as-is"
         )
-        return chunks
+        return CRAGCorrection(chunks=chunks, used_web_fallback=False)
     except Exception:  # noqa: BLE001 — a Tavily outage degrades to the corpus, never fails the request
         logger.warning("Tavily web search failed; keeping corpus chunks as-is")
-        return chunks
+        return CRAGCorrection(chunks=chunks, used_web_fallback=False)
 
     if evaluation.relevance_score >= settings.crag_ambiguous_threshold:
         combined = chunks + web_chunks
-        return combined[:top_k]
+        return CRAGCorrection(chunks=combined[:top_k], used_web_fallback=True)
 
-    return web_chunks[:top_k]
+    return CRAGCorrection(chunks=web_chunks[:top_k], used_web_fallback=True)

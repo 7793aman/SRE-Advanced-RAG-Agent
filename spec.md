@@ -84,7 +84,13 @@ artefact.
 9. As an SRE, I want sparse lexical search so that exact tokens like `imagePullPolicy` and
    `CrashLoopBackOff` reliably retrieve the right doc.
 10. As an SRE, I want dense and sparse results fused with Reciprocal Rank Fusion so that
-    hybrid retrieval is at least as good as the better of the two.
+    hybrid retrieval is at least as good as the better of the two. **Bug found during
+    issue #34 (Streamlit demo UI) prototyping, fixed as part of that same ticket:**
+    `hybrid_search`'s per-side candidate overfetch before fusion was implemented but
+    dead-commented (`app/services/vector_store.py`), so each side was only fetching
+    `top_k` candidates instead of a wider pool — a chunk ranked low in one side but high
+    in the other could be dropped before RRF ever saw it, undermining this story's own
+    acceptance criterion. Re-enable the overfetch multiplier.
 11. As an SRE, I want a cross-encoder to rerank the retrieved candidates so that the
     genuinely relevant chunk is promoted above superficially-similar noise.
 12. As an SRE, I want the reranker backend to be pluggable (a local model or a hosted API)
@@ -95,7 +101,13 @@ artefact.
     that a weak retrieval doesn't become a confident wrong answer.
 15. As an SRE, I want CRAG to fall back to web search when the corpus can't answer (e.g.
     "what's the latest stable Kubernetes release?"), so that I get a useful answer with a
-    web source instead of a hallucination.
+    web source instead of a hallucination. **Gap found during issue #34 (Streamlit demo
+    UI) prototyping, fixed as part of that same ticket:** `ChatResponse.metadata.route`
+    stays `"rag"` even when CRAG corrected with a web search — the demo UI needs a
+    trustworthy way to tell the user "this came from the web, not our docs," and today
+    the only signal is inferring it from `sources` (URLs vs. `.md` filenames), which the
+    UI shouldn't have to do. Add an explicit signal (exact shape — a new `route` value
+    or a boolean field — still to be decided alongside the rest of the UI design).
 16. As an SRE, I want a Self-RAG reflection loop to critique the generated answer and
     regenerate with a sharpened question if it's weak, up to a retry limit.
 17. As an SRE, I want Self-RAG to skip retrieval entirely for general knowledge questions
@@ -207,7 +219,10 @@ artefact.
 60. As a user, I want the Streamlit app to show the pending SQL and let me approve or
     reject it.
 61. As a user, I want preset example questions covering every path and a dashboard that
-    renders the latest eval results.
+    renders the latest eval results. **Split during issue #34 prototyping:** preset
+    questions are covered by story 59 / issue #34; the eval-results dashboard is its own
+    ticket, issue #54, blocked by #33 (its data source) — the two halves of this story
+    don't depend on each other and were coupling unrelated tickets together.
 
 ### Packaging
 
@@ -233,7 +248,11 @@ artefact.
 - **Embeddings:** OpenAI `text-embedding-3-small` (1536-dim).
 - **Vector store:** Qdrant, cosine distance.
 - **Sparse retrieval:** in-process TF-IDF (scikit-learn) built by scrolling the Qdrant
-  collection; fused with dense results via Reciprocal Rank Fusion (`k = 60`).
+  collection; fused with dense results via Reciprocal Rank Fusion (`k = 60`). **Owner
+  decision (issue #34 scope):** re-enable `vector_store.hybrid_search`'s per-side
+  candidate overfetch before fusion — currently dead-commented, so it fetches exactly
+  `top_k` per side instead of a wider pool. Fixing this belongs to issue #34, not a new
+  ticket, since it was found while prototyping that ticket's UI.
 - **Reranker:** pluggable — local sentence-transformers `CrossEncoder`
   (`ms-marco-MiniLM-L-6-v2`) by default, or a hosted rerank API; failure falls back to the
   input order.
@@ -273,7 +292,11 @@ artefact.
 - **HyDE service** — generate N hypotheses + keep the original, embed all, search each,
   dedupe by normalised text keeping best score.
 - **CRAG service** — LLM relevance grader → score; below threshold → web-search fallback;
-  handles the empty-retrieval case.
+  handles the empty-retrieval case. **Owner decision (issue #34 scope):** the web-fallback
+  case needs to be distinguishable in `ChatResponse.metadata` so the demo UI can label it
+  ("answered from the web, not our docs") instead of it looking like a normal corpus
+  answer. `route` currently stays `"rag"` either way. Exact shape TBD alongside the rest
+  of the UI design; fixing it belongs to issue #34.
 - **Web search service** — Tavily query → chunks; explicit error when unconfigured.
 - **Self-reflective service** — strict rubric critic → reflection score + regeneration
   decision + refined question; a `should_regenerate` gate bounded by a retry limit.
@@ -293,6 +316,69 @@ artefact.
 - **Eval** — golden schema + loader, flag profiles, a service invoker, the Ragas adapter,
   post-checks (forbidden keywords, source overlap), reporting/aggregation, and a CLI
   runner writing timestamped JSON.
+
+### Demo UI (issue #34)
+
+`spec.md`'s original stories 59–61 were written from a tutorial reference project, before
+the UI's actual look and behaviour had been discussed. The following was decided by
+prototyping several directions (throwaway HTML mockups, not final code — see the
+prototype link on issue #34) and is what the real Streamlit implementation should build
+from. Covers stories 59 and 60 only; story 61's eval-results panel has been split into its
+own ticket (issue #54, blocked by #33) and is still unspecified there.
+
+- **Layout — persistent sidebar, not a plain form or a pure chat window.** Compared three
+  directions: (a) chat thread with toggles hidden in a settings drawer, (b) a form +
+  result panel with no running transcript, (c) a persistent left rail (retrieval toggles +
+  preset questions, always visible) next to a log-style transcript. **(c) won** — closest
+  to idiomatic Streamlit (`st.sidebar` + `st.chat_message`), and keeps retrieval controls
+  visible instead of hidden behind a settings icon. Transcript entries are a flat,
+  rule-delineated log/timeline style, not chat bubbles.
+- **Theme — warm neutral palette, dark by default.** Background/text/borders follow
+  Claude.ai's own warm-grey palette (not a generic blue-grey or pure black/white), with a
+  single terracotta accent (`#E58762` on dark, `#BD5B3A` on light) reserved for
+  interactive/active elements only. Semantic colours (amber = pending approval, red =
+  reject/critical, green = approved/healthy) are separate from the accent and never
+  reused for anything else. Code/SQL blocks stay dark in both light and dark mode
+  (a deliberate signature, like a real terminal). Two lighter alternatives (a warm cream
+  and a muted "soothing" sage) were prototyped and are worth keeping as a
+  theme-switcher option, not just thrown away — implementation should decide whether
+  that's in scope for v1 or a follow-up.
+- **Response rendering differs by `metadata.route`**, using a glyph instead of a text
+  badge as the primary signal (shape encodes state, not just colour): `●` filled =
+  single-source resolved answer (`rag`, `sql`), `◐` half-filled = `hybrid` (merged
+  sources), `○` open = `sql_pending` (unresolved, awaiting approval). A pending-SQL entry
+  shows the generated SQL in a code block, the explanation, and Approve/Reject actions —
+  no answer text is rendered for that turn. A resolved answer shows the answer, a
+  relevance-score meter, and source tags prefixed `[doc]` / `[sql]` so origin is visible
+  at a glance without opening anything.
+- **Debug/raw detail lives in a dedicated inspector, not inline.** Every resolved answer
+  has an "Inspect response" action that opens a slide-over panel with a
+  Formatted/Raw JSON toggle — formatted shows retrieval score, cache status, reflection
+  info, and each retrieved chunk's source/score/text with a score meter; raw shows the
+  literal `ChatResponse` JSON. Keeps the transcript itself scannable while still exposing
+  everything `ResponseMetadata` carries, for users who want to audit an answer.
+- **Flag-disabling logic** (the result of an explicit code audit — see issue #34 comments
+  for the full flag × intent liveness table): only **one** conflict is knowable
+  client-side before a question is even sent — `enable_hyde` always overrides
+  `search_mode` (`hyde_search` only ever does a dense search internally, regardless of
+  the mode picked) — so the UI greys out the search_mode control the instant HyDE is
+  toggled on. Every other case (a question turning out to be pure-`sql` intent, so the
+  whole retrieval rail was unused; `enable_adaptive_retrieval` skipping retrieval
+  entirely for a general-knowledge question; `enable_rerank` silently no-op'ing below 2
+  chunks) is **not** knowable until the response comes back, because intent
+  classification is a server-side LLM call over the question text, uninfluenced by any
+  flag. Rule: never pre-disable a control based on a guess — state honestly, on the
+  response itself, what actually ran (via `route` and the inspector), rather than
+  leaving the user to wonder whether a toggle they set did anything.
+- **Preset example questions are kept**, scoped to exactly the three canonical examples
+  already used in `HANDOFF.md` (one per path: RAG, SQL, hybrid). Purpose: this is
+  explicitly a demo/test surface (issue #34 opens with "the visual tester"), the corpus
+  is deliberately 95% noise, and a made-up question is likely to land on none of the
+  three paths cleanly — presets guarantee a working example is always one click away.
+- **Out of scope for this ticket:** story 61's eval-results panel — split into its own
+  ticket, issue #54 ("Eval dashboard panel"), blocked by #33 (the eval harness that
+  produces the JSON files it reads) — and Langfuse tracing (ticket #37, unrelated
+  integration). Neither is designed yet; both need their own pass later.
 
 ### API contracts
 

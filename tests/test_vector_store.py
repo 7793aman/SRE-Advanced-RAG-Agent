@@ -163,6 +163,32 @@ def test_sparse_search_finds_exact_token_dense_search_misses(qdrant_collection: 
     assert sparse_results[0].source == "target.html"
 
 
+def test_hybrid_search_overfetches_each_side_before_fusing(qdrant_collection: str) -> None:
+    """Regression test for the dead-commented `_CANDIDATE_MULTIPLIER` line
+    (found during issue #34 prototyping): each side must fetch more than
+    `top_k` candidates before fusing, or a chunk dense ranks just outside
+    `top_k` (but sparse ranks #1) never reaches `fuse_rrf` at all.
+
+    Two chunks, top_k=1. "filler" is the closer dense match (rank 1) but
+    shares no words with the query. "buried" is dense rank 2 — just outside
+    top_k=1 — but is the *only* chunk containing the query's exact words, so
+    sparse ranks it #1. Without overfetch (candidate_k == top_k == 1), dense
+    only ever asks for 1 candidate, "buried" never reaches RRF fusion, and
+    the tied single-list scores fall back to insertion order (dense first),
+    so the wrong chunk wins. With the overfetch restored, "buried" reaches
+    fusion, scores highest (it appears in both lists), and correctly wins.
+    """
+    from app.services.vector_store import hybrid_search, upsert_chunks
+
+    filler = RetrievedChunk(text="deployment rolling update strategy", source="filler.html")
+    buried = RetrievedChunk(text="CrashLoopBackOff imagePullPolicy", source="buried.html")
+    upsert_chunks([filler, buried], [_unit_vector(0), _unit_vector(1)])
+
+    results = hybrid_search("CrashLoopBackOff imagePullPolicy", _unit_vector(0), top_k=1)
+
+    assert results[0].source == "buried.html"
+
+
 def test_source_exists_true_only_for_ingested_file_names(qdrant_collection: str) -> None:
     from app.services.vector_store import source_exists, upsert_chunks
 

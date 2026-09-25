@@ -59,7 +59,8 @@ def test_high_score_keeps_the_chunks_unchanged_and_never_calls_web_search(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == _CHUNKS
+    assert result.chunks == _CHUNKS
+    assert result.used_web_fallback is False
 
 
 def test_low_score_below_ambiguous_threshold_discards_the_corpus_for_web_only(
@@ -74,7 +75,8 @@ def test_low_score_below_ambiguous_threshold_discards_the_corpus_for_web_only(
         "What's the latest stable Kubernetes release?", _CHUNKS
     )
 
-    assert result == _WEB_CHUNKS
+    assert result.chunks == _WEB_CHUNKS
+    assert result.used_web_fallback is True
 
 
 def test_mid_score_in_the_ambiguous_band_merges_corpus_and_web_results(
@@ -87,7 +89,8 @@ def test_mid_score_in_the_ambiguous_band_merges_corpus_and_web_results(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == _CHUNKS + _WEB_CHUNKS
+    assert result.chunks == _CHUNKS + _WEB_CHUNKS
+    assert result.used_web_fallback is True
 
 
 def test_score_exactly_at_the_relevance_threshold_counts_as_correct(
@@ -109,7 +112,8 @@ def test_score_exactly_at_the_relevance_threshold_counts_as_correct(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == _CHUNKS
+    assert result.chunks == _CHUNKS
+    assert result.used_web_fallback is False
 
 
 # --- top_k: the caller's chunk count, not Tavily's own default -------------
@@ -139,7 +143,8 @@ def test_incorrect_grade_requests_and_caps_web_results_at_the_callers_top_k(
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS, top_k=3)
 
     assert calls[0]["max_results"] == 3
-    assert result == ten_web_chunks[:3]
+    assert result.chunks == ten_web_chunks[:3]
+    assert result.used_web_fallback is True
 
 
 def test_ambiguous_grade_caps_the_merged_result_at_the_callers_top_k(
@@ -152,7 +157,8 @@ def test_ambiguous_grade_caps_the_merged_result_at_the_callers_top_k(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS, top_k=1)
 
-    assert result == (_CHUNKS + _WEB_CHUNKS)[:1]
+    assert result.chunks == (_CHUNKS + _WEB_CHUNKS)[:1]
+    assert result.used_web_fallback is True
 
 
 # --- empty retrieval: skip the grader entirely ------------------------------
@@ -172,7 +178,8 @@ def test_empty_retrieval_skips_the_grader_and_goes_straight_to_web_search(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", [])
 
-    assert result == _WEB_CHUNKS
+    assert result.chunks == _WEB_CHUNKS
+    assert result.used_web_fallback is True
 
 
 # --- graceful degradation: a broken/unconfigured web fallback never crashes -
@@ -192,7 +199,8 @@ def test_unconfigured_web_search_degrades_to_the_original_chunks(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == _CHUNKS
+    assert result.chunks == _CHUNKS
+    assert result.used_web_fallback is False
 
 
 def test_grader_call_failure_skips_correction_and_never_calls_web_search(
@@ -216,7 +224,8 @@ def test_grader_call_failure_skips_correction_and_never_calls_web_search(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == _CHUNKS
+    assert result.chunks == _CHUNKS
+    assert result.used_web_fallback is False
 
 
 def test_web_search_failure_also_degrades_to_the_original_chunks(
@@ -233,7 +242,8 @@ def test_web_search_failure_also_degrades_to_the_original_chunks(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == _CHUNKS
+    assert result.chunks == _CHUNKS
+    assert result.used_web_fallback is False
 
 
 def test_unconfigured_web_search_on_empty_retrieval_degrades_to_an_empty_list(
@@ -251,7 +261,8 @@ def test_unconfigured_web_search_on_empty_retrieval_degrades_to_an_empty_list(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", [])
 
-    assert result == []
+    assert result.chunks == []
+    assert result.used_web_fallback is False
 
 
 # --- malformed grader output: treat as incorrect, don't crash --------------
@@ -269,7 +280,8 @@ def test_malformed_grader_json_treats_retrieval_as_incorrect(
 
     result = crag_service.evaluate_and_correct("What is a Pod?", _CHUNKS)
 
-    assert result == _WEB_CHUNKS
+    assert result.chunks == _WEB_CHUNKS
+    assert result.used_web_fallback is True
 
 
 # --- the grading prompt -----------------------------------------------------

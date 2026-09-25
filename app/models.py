@@ -135,6 +135,14 @@ class ResponseMetadata(BaseModel):
     reflection_iterations: int = 0
     reflection_score: float | None = None
     refined_question: str | None = None
+    # Issue #34: `route` alone can't say "this answer used a CRAG web-search
+    # correction" — a hybrid answer's route is "hybrid" either way, and a rag
+    # answer's route stays "rag" whether or not CRAG swapped in web results.
+    # True only when web results actually made it into the final chunks
+    # (evaluate_and_correct's ambiguous/incorrect branches), never on a
+    # graceful degradation (Tavily unconfigured/failed) that kept the corpus
+    # chunks unchanged.
+    used_web_fallback: bool = False
 
 
 class PendingSQLBlock(BaseModel):
@@ -178,6 +186,17 @@ class CRAGEvaluation(BaseModel):
     relevance_label: str = ""
     confidence: float = 0.0
     reasoning: str = ""
+
+
+class CRAGCorrection(BaseModel):
+    """`evaluate_and_correct`'s return value: the (possibly corrected) chunks,
+    plus whether Tavily web results actually made it into that list — the
+    caller needs this to report `ResponseMetadata.used_web_fallback` (issue
+    #34), since a graceful degradation (Tavily unconfigured or failed) also
+    returns the original chunks unchanged and must not be reported as True."""
+
+    chunks: list[RetrievedChunk]
+    used_web_fallback: bool = False
 
 
 class ReflectionResult(BaseModel):
