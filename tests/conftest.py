@@ -7,19 +7,44 @@ If one isn't reachable they skip rather than fail, so the pure-unit seams
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
-import psycopg2
-import pytest
-from fastapi.testclient import TestClient
+from dotenv import dotenv_values
 
-from app import db
-from app.config import settings
-from app.main import app
-from app.middleware.rate_limiter import MemoryBackend, rate_limiter
-from app.security import content_guard
-from app.security.token_budget import MemoryBudgetBackend, token_budget
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _point_tests_at_a_separate_database() -> None:
+    """`clean_users` truncates `users` on every run — against the same
+    database the live app/Streamlit demo uses, that wipes out whoever is
+    logged in there mid-session. `app.config.settings` is a module-level
+    singleton read once on import, so `DATABASE_URL` has to be overridden
+    *before* anything below here imports `app.config` (directly or via
+    `app.db`/`app.main`), landing every connection this test session makes
+    on a `_test`-suffixed sibling database on the same Postgres server
+    instead of the real one."""
+    base_url = dotenv_values(_PROJECT_ROOT / ".env").get("DATABASE_URL") or os.environ.get(
+        "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/adv_rag"
+    )
+    parts = urlsplit(base_url)
+    os.environ["DATABASE_URL"] = urlunsplit(parts._replace(path=f"{parts.path}_test"))
+
+
+_point_tests_at_a_separate_database()
+
+import psycopg2  # noqa: E402
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import db  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.main import app  # noqa: E402
+from app.middleware.rate_limiter import MemoryBackend, rate_limiter  # noqa: E402
+from app.security import content_guard  # noqa: E402
+from app.security.token_budget import MemoryBudgetBackend, token_budget  # noqa: E402
 
 _MIGRATION = Path(__file__).resolve().parents[1] / "seed" / "migrations" / "001_create_users.sql"
 
