@@ -108,7 +108,9 @@ def api_post(path: str, body: dict[str, Any], auth: bool = True) -> dict[str, An
 
 
 def _log_in_or_register(path: str, username: str, password: str) -> None:
-    result = api_post(path, {"username": username, "password": password}, auth=False)
+    verb = "Logging in…" if path.endswith("login") else "Registering…"
+    with st.spinner(verb):
+        result = api_post(path, {"username": username, "password": password}, auth=False)
     if result is None:
         return
     st.session_state.token = result["token"]
@@ -117,23 +119,49 @@ def _log_in_or_register(path: str, username: str, password: str) -> None:
 
 
 def render_auth_gate() -> None:
-    st.title("Query Console")
-    st.caption("Sign in to ask the Kubernetes ops assistant a question.")
-    login_tab, register_tab = st.tabs(["Log in", "Register"])
-
-    with login_tab, st.form("login_form"):
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.form_submit_button("Log in", type="primary"):
-            _log_in_or_register("/auth/login", username, password)
-
-    with register_tab, st.form("register_form"):
-        username = st.text_input("Username", key="register_username")
-        password = st.text_input(
-            "Password", type="password", key="register_password", help="At least 8 characters."
+    # A full-width st.title + bare form used to leave most of the screen
+    # empty — nothing here needs the wide layout the signed-in app uses, so
+    # this reads as an actual sign-in screen (a centered, bounded card with
+    # a mark above the title) instead of an unstyled form floating in a
+    # mostly-blank page.
+    st.markdown(
+        """
+        <style>
+        .st-key-auth_card {
+            max-width: 420px;
+            margin: 8vh auto 0;
+            padding: 2.5rem 2rem 2rem;
+            border: 1px solid rgba(242, 239, 231, 0.14);
+            border-radius: 12px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="auth_card"):
+        st.markdown(
+            "<div style='text-align:center; font-size:2.75rem; line-height:1;'>🛰️</div>"
+            "<h1 style='text-align:center; margin:0.5rem 0 0;'>Query Console</h1>"
+            "<p style='text-align:center; color:var(--text-color-secondary, #9c9a91); "
+            "margin:0.35rem 0 1.5rem;'>Sign in to ask the Kubernetes ops assistant "
+            "a question.</p>",
+            unsafe_allow_html=True,
         )
-        if st.form_submit_button("Register", type="primary"):
-            _log_in_or_register("/auth/register", username, password)
+        login_tab, register_tab = st.tabs(["Log in", "Register"])
+
+        with login_tab, st.form("login_form"):
+            username = st.text_input("Username", key="login_username")
+            password = st.text_input("Password", type="password", key="login_password")
+            if st.form_submit_button("Log in", type="primary", use_container_width=True):
+                _log_in_or_register("/auth/login", username, password)
+
+        with register_tab, st.form("register_form"):
+            username = st.text_input("Username", key="register_username")
+            password = st.text_input(
+                "Password", type="password", key="register_password", help="At least 8 characters."
+            )
+            if st.form_submit_button("Register", type="primary", use_container_width=True):
+                _log_in_or_register("/auth/register", username, password)
 
 
 # --- sidebar: retrieval controls + presets ------------------------------------
@@ -228,7 +256,9 @@ def _route_status(route: str) -> str:
 
 
 def _resolve_sql(index: int, entry: dict[str, Any], query_id: str, approved: bool) -> None:
-    result = api_post("/query/sql/execute", {"query_id": query_id, "approved": approved})
+    verb = "Running the query…" if approved else "Rejecting…"
+    with st.spinner(verb):
+        result = api_post("/query/sql/execute", {"query_id": query_id, "approved": approved})
     if result is None:
         return
     entry["response"] = result
@@ -343,7 +373,8 @@ def send_question(question: str) -> None:
     question = question.strip()
     if not question:
         return
-    response = api_post("/query", {"question": question, **_current_flags()})
+    with st.spinner("Thinking…"):
+        response = api_post("/query", {"question": question, **_current_flags()})
     if response is None:
         return
     st.session_state.messages.append({"question": question, "response": response})
