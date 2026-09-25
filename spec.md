@@ -351,19 +351,22 @@ own ticket (issue #54, blocked by #33) and is still unspecified there.
   no answer text is rendered for that turn. A resolved answer shows the answer, a
   relevance-score meter, and source tags prefixed `[doc]` / `[sql]` so origin is visible
   at a glance without opening anything.
-- **Debug/raw detail lives in a dedicated inspector, not inline.** Every resolved answer
-  has an "Inspect response" action; clicking it shows that answer's detail — a
-  Formatted/Raw JSON toggle — in a **persistent right-hand column**, not inline in the
-  transcript. (First built as a per-message `st.expander`, which put the detail back
-  inline and defeated the point — corrected after review while testing issue #34.
-  Streamlit has no real slide-over/drawer component, so a persistent column is the
-  actual implementation, not literally a sliding panel.) Formatted shows retrieval
-  score, cache status, reflection info, and each retrieved chunk's source/score/text
-  with a score meter; raw shows the literal `ChatResponse` JSON. The column defaults to
-  the most recently resolved answer and keeps showing it until another "Inspect
-  response" is clicked; a pending SQL turn has no such action since there's nothing
-  resolved yet to inspect. Keeps the transcript itself scannable while still exposing
-  everything `ResponseMetadata` carries, for users who want to audit an answer.
+- **Debug/raw detail lives in a per-message `st.expander`, directly under that answer.**
+  Every resolved answer has an "Inspect response" expander showing a Formatted/Raw JSON
+  toggle for that turn — retrieval score, cache status, reflection info, and each
+  retrieved chunk's source/score/text with a score meter (formatted), or the literal
+  `ChatResponse` JSON (raw). A pending SQL turn has no such expander since there's
+  nothing resolved yet to inspect. This setting has flip-flopped twice during live
+  testing of issue #34, in both directions, for the same underlying reason each time —
+  worth recording so it isn't re-litigated a third time on a hunch: first built as this
+  same per-message expander; changed to a **persistent right-hand column** (one shared
+  panel showing whichever answer was last clicked) on the theory that inline detail
+  competed with the transcript for attention; reverted back to the per-message expander
+  after live use showed the opposite problem — a single growing shared column made it
+  unclear *which* answer's detail was on screen as the transcript grew, which is a worse
+  failure than competing for attention. The expander keeps the transcript scannable at a
+  glance (collapsed by default) while keeping each answer's detail unambiguously scoped
+  to itself, with no shared state to confuse.
 - **Flag-disabling logic** (the result of an explicit code audit — see issue #34 comments
   for the full flag × intent liveness table): only **one** conflict is knowable
   client-side before a question is even sent — `enable_hyde` always overrides

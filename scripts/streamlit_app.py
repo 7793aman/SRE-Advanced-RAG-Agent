@@ -14,11 +14,12 @@ render as Streamlit's native `st.chat_message` bubbles rather than the
 prototype's flat log-entry style, and presets ask their question immediately
 on click rather than only prefilling it — both are Streamlit-idiomatic
 choices that keep this maintainable rather than fighting the framework for
-pixel parity with a throwaway mockup. The inspector itself is a persistent
-right-hand column (`st.columns`, not a real slide-over — Streamlit has no
-such component) showing whichever resolved answer was last clicked, rather
-than the prototype's per-message inline expander, to actually deliver on
-spec.md's "dedicated inspector, not inline."
+pixel parity with a throwaway mockup. The inspector is a per-message
+`st.expander` directly under that answer (a persistent shared right-hand
+column was tried and reverted after live testing — one growing column
+whose content depended on whatever was last clicked made it unclear which
+answer's detail was showing; an expander scoped to its own message has no
+such shared state to confuse).
 """
 
 from __future__ import annotations
@@ -262,11 +263,6 @@ def _resolve_sql(index: int, entry: dict[str, Any], query_id: str, approved: boo
     if result is None:
         return
     entry["response"] = result
-    # A rejected/refused/errored resolution still isn't "pending" any more —
-    # it's a resolved (if unhappy) turn, so it becomes inspectable like any
-    # other resolved answer instead of leaving the panel on stale content.
-    if not result.get("pending_sql"):
-        st.session_state.inspecting_index = index
     st.rerun()
 
 
@@ -314,61 +310,30 @@ def render_response(index: int, entry: dict[str, Any]) -> None:
             ]
             st.caption(", ".join(tags))
 
-    is_showing = st.session_state.get("inspecting_index") == index
-    if st.button(
-        "Showing in inspector →" if is_showing else "Inspect response",
-        key=f"inspect_{index}",
-        disabled=is_showing,
-    ):
-        st.session_state.inspecting_index = index
-        st.rerun()
+    # Scoped to this one message — an `st.expander` per answer, not a shared
+    # panel — so there's never a question of whose detail is on screen.
+    with st.expander("Inspect response"):
+        formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
+        with formatted_tab:
+            st.write(f"**Cache:** {'hit' if response['cache_hit'] else 'miss'}")
+            reflection_note = f"{metadata['reflection_iterations']} iteration(s)"
+            if metadata.get("reflection_score") is not None:
+                reflection_note += f", score {metadata['reflection_score']:.2f}"
+            st.write(f"**Reflection:** {reflection_note}")
 
-
-# --- inspector: persistent right-hand column ------------------------------
-
-
-def render_inspector_panel() -> None:
-    """spec.md: "Debug/raw detail lives in a dedicated inspector, not
-    inline." Streamlit has no real slide-over, so this is a persistent
-    column showing whichever resolved answer was last clicked — always
-    visible, never inline in the transcript."""
-    st.subheader("Inspect response")
-
-    index = st.session_state.get("inspecting_index")
-    messages = st.session_state.messages
-    if (
-        index is None
-        or index >= len(messages)
-        or messages[index]["response"] is None
-        or messages[index]["response"].get("pending_sql")
-    ):
-        st.caption("Click “Inspect response” on an answer to see its detail here.")
-        return
-
-    entry = messages[index]
-    response = entry["response"]
-    metadata = response["metadata"]
-
-    st.caption(f"“{entry['question']}”")
-    formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
-    with formatted_tab:
-        st.write(f"**Cache:** {'hit' if response['cache_hit'] else 'miss'}")
-        reflection_note = f"{metadata['reflection_iterations']} iteration(s)"
-        if metadata.get("reflection_score") is not None:
-            reflection_note += f", score {metadata['reflection_score']:.2f}"
-        st.write(f"**Reflection:** {reflection_note}")
-
-        chunks = metadata.get("retrieved_chunks", [])
-        if not chunks:
-            st.caption("No chunks retrieved for this turn.")
-        for chunk in chunks:
-            st.progress(_clamped(chunk["score"]), text=f"{chunk['source']} — {chunk['score']:.2f}")
-            # Retrieved chunk text is arbitrary corpus content, not markdown
-            # we wrote — st.caption/st.write would parse a stray "#" as a
-            # heading. st.text renders it literally.
-            st.text(chunk["text"])
-    with raw_tab:
-        st.json(response)
+            chunks = metadata.get("retrieved_chunks", [])
+            if not chunks:
+                st.caption("No chunks retrieved for this turn.")
+            for chunk in chunks:
+                st.progress(
+                    _clamped(chunk["score"]), text=f"{chunk['source']} — {chunk['score']:.2f}"
+                )
+                # Retrieved chunk text is arbitrary corpus content, not
+                # markdown we wrote — st.caption/st.write would parse a
+                # stray "#" as a heading. st.text renders it literally.
+                st.text(chunk["text"])
+        with raw_tab:
+            st.json(response)
 
 
 # --- transcript + composer -----------------------------------------------------
@@ -393,11 +358,6 @@ def _fetch_response(index: int, entry: dict[str, Any]) -> None:
         st.rerun()
         return
     entry["response"] = response
-    # A resolved answer becomes the inspector's default content — a pending
-    # SQL turn has nothing inspectable yet, so the panel keeps showing
-    # whatever was selected before (or the empty-state prompt).
-    if not response.get("pending_sql"):
-        st.session_state.inspecting_index = index
     st.rerun()
 
 
@@ -416,10 +376,8 @@ def render_composer() -> None:
     # Streamlit only docks `st.chat_input` to the bottom of the viewport
     # (the ChatGPT/Claude-style "input stays put, transcript scrolls"
     # behavior) when it's called at the top level — nested inside
-    # `st.columns`/`st.container`, as it used to be here, it just renders
-    # inline instead and scrolls away with the rest of the page. `main()`
-    # calls this outside the transcript/inspector columns so it gets that
-    # native docking back.
+    # `st.columns`/`st.container`, as it used to be at one point, it just
+    # renders inline instead and scrolls away with the rest of the page.
     question = st.chat_input("Ask about your clusters…")
     if question:
         send_question(question)
@@ -433,7 +391,6 @@ def main() -> None:
     st.session_state.setdefault("token", None)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("messages", [])
-    st.session_state.setdefault("inspecting_index", None)
 
     if not st.session_state.token:
         render_auth_gate()
@@ -443,31 +400,7 @@ def main() -> None:
     st.title("Query Console")
     st.caption("Ask about your clusters, or approve a generated query.")
 
-    # The sidebar gets its visual separation for free (Streamlit gives it its
-    # own themed background); these two plain `st.columns` don't, so without
-    # this they just look like one wide area with some empty space in the
-    # middle. `key=` on the wrapping container gives Streamlit's own
-    # generated class (`st-key-query_panes`) to scope the border to only
-    # this column pair — a bare `[data-testid="stColumn"]` selector would
-    # also catch the unrelated Approve/Reject button columns inside a
-    # pending-SQL card.
-    st.markdown(
-        """
-        <style>
-        .st-key-query_panes [data-testid="stColumn"]:last-of-type {
-            border-left: 1px solid rgba(242, 239, 231, 0.16);
-            padding-left: 2rem;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    with st.container(key="query_panes"):
-        transcript_col, inspector_col = st.columns([1.6, 1], gap="large")
-        with transcript_col:
-            render_transcript()
-        with inspector_col:
-            render_inspector_panel()
+    render_transcript()
     render_composer()
 
 
