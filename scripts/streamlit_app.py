@@ -386,7 +386,7 @@ def main() -> None:
     st.title("Query Console")
     st.caption("Ask about your clusters, or approve a generated query.")
 
-    transcript_col, inspector_col = st.columns([2.5, 1], gap="large")
+    transcript_col, inspector_col = st.columns([1.6, 1], gap="large")
     with transcript_col:
         render_transcript()
         render_composer()
