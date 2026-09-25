@@ -18,9 +18,9 @@ from app.services import graph as graph_module
 
 @pytest.fixture(autouse=True)
 def _clear_graph_cache() -> Iterator[None]:
-    graph_module.get_graph.cache_clear()
+    graph_module._graph_singleton.reset()
     yield
-    graph_module.get_graph.cache_clear()
+    graph_module._graph_singleton.reset()
 
 
 def test_get_graph_compiles_with_a_live_postgres_checkpointer(db_ready: None) -> None:

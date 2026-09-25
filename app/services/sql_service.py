@@ -260,8 +260,12 @@ def _serialise(value: Any) -> Any:
     return str(value)
 
 
-def execute_sql(sql: str) -> list[dict[str, Any]]:
-    """Run an approved query and return JSON-safe rows (at most `MAX_ROWS`).
+def execute_sql(sql: str) -> tuple[list[dict[str, Any]], bool]:
+    """Run an approved query; return (JSON-safe rows, at most `MAX_ROWS`) and
+    whether they came from the `sql_result` cache rather than a fresh query —
+    callers need that to report `ChatResponse.cache_hit` honestly (issue
+    #34's demo UI: the SQL path used to always report `cache_hit=False`,
+    even on a real cache hit, since nothing surfaced it up to the response).
 
     Re-runs the guard, so it is safe to call with any string. Results are
     cached by normalised SQL.
@@ -270,7 +274,7 @@ def execute_sql(sql: str) -> list[dict[str, Any]]:
 
     cached = query_cache.get_sql_result(safe_sql)
     if cached is not None:
-        return cached
+        return cached, True
 
     try:
         with connection() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -286,4 +290,4 @@ def execute_sql(sql: str) -> list[dict[str, Any]]:
 
     rows = [{key: _serialise(val) for key, val in row.items()} for row in fetched]
     query_cache.set_sql_result(safe_sql, rows)
-    return rows
+    return rows, False

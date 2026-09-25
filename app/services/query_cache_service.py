@@ -12,6 +12,7 @@ hits/misses/sets so `stats()` can report a per-tier hit rate.
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import threading
@@ -31,6 +32,8 @@ class _KVBackend(Protocol):
     def set(self, key: str, value: str, ttl_seconds: int) -> None: ...
 
     def delete(self, keys: list[str]) -> None: ...
+
+    def keys(self, pattern: str) -> list[str]: ...
 
 
 class MemoryBackend:
@@ -56,6 +59,9 @@ class MemoryBackend:
         for key in keys:
             self._store.pop(key, None)
 
+    def keys(self, pattern: str) -> list[str]:
+        return [key for key in self._store if fnmatch.fnmatchcase(key, pattern)]
+
     def clear(self) -> None:
         self._store.clear()
 
@@ -79,6 +85,9 @@ class _UpstashBackend:
         if keys:
             self._redis.delete(*keys)
 
+    def keys(self, pattern: str) -> list[str]:
+        return list(self._redis.keys(pattern))
+
 
 def _default_backend() -> _KVBackend:
     if settings.upstash_redis_url and settings.upstash_redis_token:
@@ -101,9 +110,6 @@ class QueryCacheService:
         self._stats: dict[str, dict[str, int]] = {
             tier: {"hits": 0, "misses": 0, "sets": 0} for tier in _TIERS
         }
-        # Keys ever written per tier, so `clear()` can delete them by name even
-        # against a Redis backend that doesn't support SCAN-by-pattern well.
-        self._keys_by_tier: dict[str, set[str]] = {tier: set() for tier in _TIERS}
         self._lock = threading.Lock()
 
     def _key(self, tier: str, raw: str) -> str:
@@ -120,7 +126,6 @@ class QueryCacheService:
         self._backend.set(key, value, _TTL_BY_TIER[tier])
         with self._lock:
             self._stats[tier]["sets"] += 1
-            self._keys_by_tier[tier].add(key)
 
     # --- embedding tier -----------------------------------------------------
 
@@ -225,19 +230,24 @@ class QueryCacheService:
     def clear(self) -> None:
         """Drop every cached entry and reset stats, for `/admin/cache/clear`.
 
-        The (potentially slow, network) backend delete happens outside the
-        lock — only the in-process bookkeeping reset needs it — so a clear
-        against real Redis doesn't stall every other request's stats update
-        for the duration of five sequential delete round trips.
+        Scans the backend directly for each tier's `{tier}:*` keys rather
+        than trusting an in-process record of what this process has written
+        — that in-process bookkeeping used to be the only source of what to
+        delete, which meant `clear()` against the real (Upstash, persistent
+        across restarts) backend silently missed every key written by an
+        *earlier* process instance: it reported success but left stale
+        entries in place indefinitely (found chasing a stale `sql_result`
+        entry that survived several "successful" clears tonight). The scan
+        happens outside the lock — only the stats reset needs it — so a
+        clear against real Redis doesn't stall every other request's stats
+        update for the duration of five sequential scan+delete round trips.
         """
-        keys_by_tier: dict[str, list[str]] = {}
         with self._lock:
             for tier in _TIERS:
-                keys_by_tier[tier] = list(self._keys_by_tier[tier])
-                self._keys_by_tier[tier].clear()
                 self._stats[tier] = {"hits": 0, "misses": 0, "sets": 0}
 
-        for keys in keys_by_tier.values():
+        for tier in _TIERS:
+            keys = self._backend.keys(f"{tier}:*")
             if keys:
                 self._backend.delete(keys)
 

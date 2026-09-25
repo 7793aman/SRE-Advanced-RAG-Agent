@@ -9,13 +9,12 @@ caller wants a different shape.
 
 from __future__ import annotations
 
-from functools import lru_cache
-
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.lazy_singleton import LazySingleton
 
 
 class LLMResponse(BaseModel):
@@ -25,9 +24,11 @@ class LLMResponse(BaseModel):
     total_tokens: int = 0
 
 
-@lru_cache(maxsize=1)
+_client: LazySingleton[OpenAI] = LazySingleton(lambda: OpenAI(api_key=settings.openai_api_key))
+
+
 def _get_client() -> OpenAI:
-    return OpenAI(api_key=settings.openai_api_key)
+    return _client.get()
 
 
 def _messages(prompt: str, system_prompt: str | None) -> list[ChatCompletionMessageParam]:

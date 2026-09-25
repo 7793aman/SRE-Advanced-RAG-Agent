@@ -83,10 +83,17 @@ def _grade(question: str, chunks: list[RetrievedChunk]) -> CRAGEvaluation:
     try:
         return CRAGEvaluation.model_validate(json.loads(response.text))
     except (json.JSONDecodeError, ValidationError):
-        logger.warning("CRAG grader returned malformed JSON; treating retrieval as incorrect")
+        # Same degradation as a call failure above: a broken judge isn't
+        # evidence the retrieval is bad. This used to return "incorrect",
+        # which forced a Tavily web-fallback on perfectly good retrieval
+        # whenever the grader merely mis-formatted its JSON — contradicting
+        # this module's own documented contract (top of file) and the
+        # identical graceful-degradation pattern every sibling classifier
+        # (router_service, reflection_service) already follows correctly.
+        logger.warning("CRAG grader returned malformed JSON; keeping retrieval as-is")
         return CRAGEvaluation(
-            relevance_score=0.0,
-            relevance_label="incorrect",
+            relevance_score=1.0,
+            relevance_label="correct",
             confidence=0.0,
             reasoning="grader output was malformed",
         )
