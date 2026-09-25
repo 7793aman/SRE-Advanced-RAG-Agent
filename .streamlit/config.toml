@@ -1,0 +1,13 @@
+# Issue #34's "Claude Dark" theme: warm dark grey (not near-black), one
+# terracotta accent reserved for interactive elements. See spec.md's
+# "Demo UI (issue #34)" section for the full design writeup.
+[theme]
+base = "dark"
+primaryColor = "#E58762"
+backgroundColor = "#1F1E1B"
+secondaryBackgroundColor = "#26251F"
+textColor = "#F2EFE7"
+font = "sans serif"
+
+[server]
+headless = true

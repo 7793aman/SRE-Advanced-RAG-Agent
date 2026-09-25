@@ -230,8 +230,7 @@ def hybrid_search(query: str, query_embedding: list[float], top_k: int = 5) -> l
     otherwise a chunk that dense ranks just outside `top_k` (but sparse ranks
     #1) never reaches `fuse_rrf` at all, undercutting hybrid's "at least as
     good as the better of the two" guarantee."""
-    # candidate_k = top_k * _CANDIDATE_MULTIPLIER
-    candidate_k = top_k
+    candidate_k = top_k * _CANDIDATE_MULTIPLIER
     dense_results = search(query_embedding, top_k=candidate_k)
     sparse_results = sparse_search(query, top_k=candidate_k)
     fused = fuse_rrf([dense_results, sparse_results])

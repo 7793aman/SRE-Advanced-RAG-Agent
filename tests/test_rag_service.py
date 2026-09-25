@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.models import ReflectionResult, RetrievedChunk
+from app.models import CRAGCorrection, ReflectionResult, RetrievedChunk
 from app.services.llm_service import LLMResponse
 from app.services.query_cache_service import MemoryBackend, QueryCacheService
 
@@ -82,7 +82,7 @@ def _crag_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     override this per-test to exercise the real call."""
     monkeypatch.setattr(
         "app.services.rag_service.evaluate_and_correct",
-        lambda question, chunks, top_k=5: chunks,
+        lambda question, chunks, top_k=5: CRAGCorrection(chunks=chunks, used_web_fallback=False),
     )
 
 
@@ -421,7 +421,8 @@ def test_crag_enabled_grades_the_final_top_k_chunks(
     monkeypatch.setattr(
         "app.services.rag_service.evaluate_and_correct",
         lambda question, chunks, top_k=5: (
-            calls.append({"question": question, "chunks": chunks, "top_k": top_k}) or chunks
+            calls.append({"question": question, "chunks": chunks, "top_k": top_k})
+            or CRAGCorrection(chunks=chunks, used_web_fallback=False)
         ),
     )
 
@@ -447,13 +448,58 @@ def test_crag_correction_replaces_the_chunks_used_to_generate_and_cite(
     )
     monkeypatch.setattr(
         "app.services.rag_service.evaluate_and_correct",
-        lambda question, chunks, top_k=5: [web_chunk],
+        lambda question, chunks, top_k=5: CRAGCorrection(
+            chunks=[web_chunk], used_web_fallback=True
+        ),
     )
 
     response, chunks = run_rag_with_trace("What's the latest stable Kubernetes release?", _FLAGS)
 
     assert chunks == [web_chunk]
     assert response.sources == ["https://kubernetes.io/releases/"]
+    assert response.metadata.used_web_fallback is True
+
+
+def test_used_web_fallback_defaults_to_false_without_a_correction(
+    fresh_cache, fake_search, fake_embed, fake_generate
+) -> None:
+    """The `_crag_passthrough` fixture's identity pass-through never corrects
+    with the web, so the response must report that honestly."""
+    from app.services.rag_service import run_rag_with_trace
+
+    response, _ = run_rag_with_trace("What is a Pod?", _FLAGS)
+
+    assert response.metadata.used_web_fallback is False
+
+
+def test_web_fallback_on_a_later_reflection_retry_still_reports_true(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """used_web_fallback must stay True once any attempt — including a
+    reflection retry, not just the first pass — actually used it."""
+    from app.services.rag_service import run_rag_with_trace
+
+    corrections = [
+        CRAGCorrection(chunks=_CHUNKS, used_web_fallback=False),
+        CRAGCorrection(chunks=_CHUNKS, used_web_fallback=True),
+    ]
+    monkeypatch.setattr(
+        "app.services.rag_service.evaluate_and_correct",
+        lambda question, chunks, top_k=5: corrections.pop(0),
+    )
+    reflections = [
+        ReflectionResult(
+            reflection_score=0.3, needs_regeneration=True, refined_question="refined question"
+        ),
+        ReflectionResult(reflection_score=0.9, needs_regeneration=False),
+    ]
+    monkeypatch.setattr("app.services.rag_service.reflect", lambda *a, **k: reflections.pop(0))
+
+    response, _ = run_rag_with_trace(
+        "tell me about scaling", {**_FLAGS, "enable_self_reflective": True}
+    )
+
+    assert response.metadata.used_web_fallback is True
 
 
 # --- enable_self_reflective: the Self-RAG reflection loop (ticket #28) -----

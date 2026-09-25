@@ -91,5 +91,10 @@ class Settings(BaseSettings):
     log_json: bool = False
     log_level: str = "INFO"
 
+    # === Demo UI (issue #34) ===
+    # Only read by scripts/streamlit_app.py, which talks to the API over HTTP
+    # like any other client rather than importing FastAPI internals directly.
+    streamlit_api_base_url: str = "http://localhost:8000"
+
 
 settings = Settings()
