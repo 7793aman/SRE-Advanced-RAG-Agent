@@ -7,19 +7,65 @@ If one isn't reachable they skip rather than fail, so the pure-unit seams
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import psycopg2
-import pytest
-from fastapi.testclient import TestClient
+from dotenv import dotenv_values
 
-from app import db
-from app.config import settings
-from app.main import app
-from app.middleware.rate_limiter import MemoryBackend, rate_limiter
-from app.security import content_guard
-from app.security.token_budget import MemoryBudgetBackend, token_budget
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _point_tests_at_a_separate_database() -> None:
+    """`clean_users` truncates `users` on every run — against the same
+    database the live app/Streamlit demo uses, that wipes out whoever is
+    logged in there mid-session. `app.config.settings` is a module-level
+    singleton read once on import, so `DATABASE_URL` has to be overridden
+    *before* anything below here imports `app.config` (directly or via
+    `app.db`/`app.main`), landing every connection this test session makes
+    on a `_test`-suffixed sibling database on the same Postgres server
+    instead of the real one.
+
+    Creates that sibling database on first use (e.g. a fresh worktree or
+    CI box that's never run these tests against this Postgres before) so
+    the isolation is automatic rather than a manual setup step someone has
+    to remember. If Postgres isn't reachable at all, this is a no-op —
+    `db_ready`/`migrations_applied` already skip cleanly in that case."""
+    base_url = dotenv_values(_PROJECT_ROOT / ".env").get("DATABASE_URL") or os.environ.get(
+        "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/adv_rag"
+    )
+    parts = urlsplit(base_url)
+    test_db_name = f"{parts.path.lstrip('/')}_test"
+    os.environ["DATABASE_URL"] = urlunsplit(parts._replace(path=f"/{test_db_name}"))
+
+    maintenance_url = urlunsplit(parts._replace(path="/postgres"))
+    try:
+        conn = psycopg2.connect(maintenance_url)
+    except psycopg2.OperationalError:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db_name,))
+            if cur.fetchone() is None:
+                cur.execute(f'CREATE DATABASE "{test_db_name}"')
+    finally:
+        conn.close()
+
+
+_point_tests_at_a_separate_database()
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app import db  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.main import app  # noqa: E402
+from app.middleware.rate_limiter import MemoryBackend, rate_limiter  # noqa: E402
+from app.security import content_guard  # noqa: E402
+from app.security.token_budget import MemoryBudgetBackend, token_budget  # noqa: E402
 
 _MIGRATION = Path(__file__).resolve().parents[1] / "seed" / "migrations" / "001_create_users.sql"
 

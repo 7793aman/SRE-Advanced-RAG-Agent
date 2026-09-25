@@ -14,15 +14,17 @@ render as Streamlit's native `st.chat_message` bubbles rather than the
 prototype's flat log-entry style, and presets ask their question immediately
 on click rather than only prefilling it — both are Streamlit-idiomatic
 choices that keep this maintainable rather than fighting the framework for
-pixel parity with a throwaway mockup. The inspector itself is a persistent
-right-hand column (`st.columns`, not a real slide-over — Streamlit has no
-such component) showing whichever resolved answer was last clicked, rather
-than the prototype's per-message inline expander, to actually deliver on
-spec.md's "dedicated inspector, not inline."
+pixel parity with a throwaway mockup. The inspector is a per-message
+`st.expander` directly under that answer (a persistent shared right-hand
+column was tried and reverted after live testing — one growing column
+whose content depended on whatever was last clicked made it unclear which
+answer's detail was showing; an expander scoped to its own message has no
+such shared state to confuse).
 """
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 import requests
@@ -33,6 +35,24 @@ from app.config import settings
 st.set_page_config(page_title="Query Console", page_icon="🛰️", layout="wide")
 
 _API = settings.streamlit_api_base_url
+
+# `st.session_state` is tied to the browser tab's live connection — a reload
+# opens a new one with empty state, which is why reloading used to bounce
+# back to the login screen every time. This is a process-lifetime, in-memory
+# map from a random session id (never the JWT itself) to the logged-in
+# token/username; the id lives in the URL's query string (`?sid=...`), which
+# *does* survive a reload, so `_restore_session` below can look the real
+# token back up instead of putting the token itself in the URL.
+#
+# A plain module-level dict won't do — Streamlit re-executes this whole
+# script top to bottom on *every* rerun (not just every reload), so a bare
+# `_SESSIONS = {}` here would reinitialize to empty on the very next rerun
+# after login, wiping the entry it just wrote. `st.cache_resource` is
+# Streamlit's own way to get a value that's actually built once and shared
+# for the life of the process, across every rerun and every session.
+@st.cache_resource
+def _session_store() -> dict[str, dict[str, str]]:
+    return {}
 
 _PRESETS = [
     "How do I debug a crashing pod?",
@@ -107,33 +127,82 @@ def api_post(path: str, body: dict[str, Any], auth: bool = True) -> dict[str, An
 # --- auth --------------------------------------------------------------------
 
 
+def _start_session(token: str, username: str) -> None:
+    sid = secrets.token_urlsafe(24)
+    _session_store()[sid] = {"token": token, "username": username}
+    st.session_state.token = token
+    st.session_state.username = username
+    st.query_params["sid"] = sid
+
+
+def _restore_session() -> None:
+    session = _session_store().get(st.query_params.get("sid", ""))
+    if session is None:
+        return
+    st.session_state.token = session["token"]
+    st.session_state.username = session["username"]
+
+
+def _end_session() -> None:
+    _session_store().pop(st.query_params.get("sid", ""), None)
+    st.query_params.clear()
+    st.session_state.clear()
+
+
 def _log_in_or_register(path: str, username: str, password: str) -> None:
-    result = api_post(path, {"username": username, "password": password}, auth=False)
+    verb = "Logging in…" if path.endswith("login") else "Registering…"
+    with st.spinner(verb):
+        result = api_post(path, {"username": username, "password": password}, auth=False)
     if result is None:
         return
-    st.session_state.token = result["token"]
-    st.session_state.username = username
+    _start_session(result["token"], username)
     st.rerun()
 
 
 def render_auth_gate() -> None:
-    st.title("Query Console")
-    st.caption("Sign in to ask the Kubernetes ops assistant a question.")
-    login_tab, register_tab = st.tabs(["Log in", "Register"])
-
-    with login_tab, st.form("login_form"):
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
-        if st.form_submit_button("Log in", type="primary"):
-            _log_in_or_register("/auth/login", username, password)
-
-    with register_tab, st.form("register_form"):
-        username = st.text_input("Username", key="register_username")
-        password = st.text_input(
-            "Password", type="password", key="register_password", help="At least 8 characters."
+    # A full-width st.title + bare form used to leave most of the screen
+    # empty — nothing here needs the wide layout the signed-in app uses, so
+    # this reads as an actual sign-in screen (a centered, bounded card with
+    # a mark above the title) instead of an unstyled form floating in a
+    # mostly-blank page.
+    st.markdown(
+        """
+        <style>
+        .st-key-auth_card {
+            max-width: 420px;
+            margin: 8vh auto 0;
+            padding: 2.5rem 2rem 2rem;
+            border: 1px solid rgba(242, 239, 231, 0.14);
+            border-radius: 12px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="auth_card"):
+        st.markdown(
+            "<div style='text-align:center; font-size:2.75rem; line-height:1;'>🛰️</div>"
+            "<h1 style='text-align:center; margin:0.5rem 0 0;'>Query Console</h1>"
+            "<p style='text-align:center; color:var(--text-color-secondary, #9c9a91); "
+            "margin:0.35rem 0 1.5rem;'>Sign in to ask the Kubernetes ops assistant "
+            "a question.</p>",
+            unsafe_allow_html=True,
         )
-        if st.form_submit_button("Register", type="primary"):
-            _log_in_or_register("/auth/register", username, password)
+        login_tab, register_tab = st.tabs(["Log in", "Register"])
+
+        with login_tab, st.form("login_form"):
+            username = st.text_input("Username", key="login_username")
+            password = st.text_input("Password", type="password", key="login_password")
+            if st.form_submit_button("Log in", type="primary", use_container_width=True):
+                _log_in_or_register("/auth/login", username, password)
+
+        with register_tab, st.form("register_form"):
+            username = st.text_input("Username", key="register_username")
+            password = st.text_input(
+                "Password", type="password", key="register_password", help="At least 8 characters."
+            )
+            if st.form_submit_button("Register", type="primary", use_container_width=True):
+                _log_in_or_register("/auth/register", username, password)
 
 
 # --- sidebar: retrieval controls + presets ------------------------------------
@@ -155,7 +224,7 @@ def render_sidebar() -> None:
     with st.sidebar:
         st.caption(f"Signed in as **{st.session_state.username}**")
         if st.button("Log out"):
-            st.session_state.clear()
+            _end_session()
             st.rerun()
 
         st.divider()
@@ -228,26 +297,51 @@ def _route_status(route: str) -> str:
 
 
 def _resolve_sql(index: int, entry: dict[str, Any], query_id: str, approved: bool) -> None:
-    result = api_post("/query/sql/execute", {"query_id": query_id, "approved": approved})
+    verb = "Running the query…" if approved else "Rejecting…"
+    with st.spinner(verb):
+        result = api_post("/query/sql/execute", {"query_id": query_id, "approved": approved})
     if result is None:
         return
     entry["response"] = result
-    # A rejected/refused/errored resolution still isn't "pending" any more —
-    # it's a resolved (if unhappy) turn, so it becomes inspectable like any
-    # other resolved answer instead of leaving the panel on stale content.
-    if not result.get("pending_sql"):
-        st.session_state.inspecting_index = index
     st.rerun()
 
 
 def render_pending_sql(index: int, entry: dict[str, Any], pending: dict[str, Any]) -> None:
     st.write(pending["explanation"])
     st.code(pending["sql"], language="sql")
-    approve_col, reject_col = st.columns(2)
-    if approve_col.button("Approve & run", key=f"approve_{pending['query_id']}", type="primary"):
-        _resolve_sql(index, entry, pending["query_id"], approved=True)
-    if reject_col.button("Reject", key=f"reject_{pending['query_id']}"):
-        _resolve_sql(index, entry, pending["query_id"], approved=False)
+    # `st.columns` always splits the row into equal-width tracks and a button
+    # doesn't stretch to fill its track, so any fixed ratio still leaves each
+    # button sitting at the *left* of its own too-wide track — which reads as
+    # mismatched sizes with a gap between them, worse the wider the chat
+    # bubble is. Scoping this row's columns to shrink to their buttons'
+    # actual content width (instead of splitting available space) is what
+    # actually puts them flush next to each other.
+    st.markdown(
+        """
+        <style>
+        [class*="st-key-sql_actions_"] [data-testid="stHorizontalBlock"] {
+            width: fit-content;
+            gap: 0.6rem;
+        }
+        [class*="st-key-sql_actions_"] [data-testid="stColumn"] {
+            width: fit-content !important;
+            flex: none !important;
+            min-width: 0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    # Keyed per query, not a shared literal key — two pending-SQL turns
+    # showing at once would otherwise collide on the same container key.
+    with st.container(key=f"sql_actions_{pending['query_id']}"):
+        approve_col, reject_col = st.columns(2)
+        if approve_col.button(
+            "Approve & run", key=f"approve_{pending['query_id']}", type="primary"
+        ):
+            _resolve_sql(index, entry, pending["query_id"], approved=True)
+        if reject_col.button("Reject", key=f"reject_{pending['query_id']}"):
+            _resolve_sql(index, entry, pending["query_id"], approved=False)
 
 
 def render_response(index: int, entry: dict[str, Any]) -> None:
@@ -284,74 +378,55 @@ def render_response(index: int, entry: dict[str, Any]) -> None:
             ]
             st.caption(", ".join(tags))
 
-    is_showing = st.session_state.get("inspecting_index") == index
-    if st.button(
-        "Showing in inspector →" if is_showing else "Inspect response",
-        key=f"inspect_{index}",
-        disabled=is_showing,
-    ):
-        st.session_state.inspecting_index = index
-        st.rerun()
+    # Scoped to this one message — an `st.expander` per answer, not a shared
+    # panel — so there's never a question of whose detail is on screen.
+    with st.expander("Inspect response"):
+        formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
+        with formatted_tab:
+            st.write(f"**Cache:** {'hit' if response['cache_hit'] else 'miss'}")
+            reflection_note = f"{metadata['reflection_iterations']} iteration(s)"
+            if metadata.get("reflection_score") is not None:
+                reflection_note += f", score {metadata['reflection_score']:.2f}"
+            st.write(f"**Reflection:** {reflection_note}")
 
-
-# --- inspector: persistent right-hand column ------------------------------
-
-
-def render_inspector_panel() -> None:
-    """spec.md: "Debug/raw detail lives in a dedicated inspector, not
-    inline." Streamlit has no real slide-over, so this is a persistent
-    column showing whichever resolved answer was last clicked — always
-    visible, never inline in the transcript."""
-    st.subheader("Inspect response")
-
-    index = st.session_state.get("inspecting_index")
-    messages = st.session_state.messages
-    if index is None or index >= len(messages) or messages[index]["response"].get("pending_sql"):
-        st.caption("Click “Inspect response” on an answer to see its detail here.")
-        return
-
-    entry = messages[index]
-    response = entry["response"]
-    metadata = response["metadata"]
-
-    st.caption(f"“{entry['question']}”")
-    formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
-    with formatted_tab:
-        st.write(f"**Cache:** {'hit' if response['cache_hit'] else 'miss'}")
-        reflection_note = f"{metadata['reflection_iterations']} iteration(s)"
-        if metadata.get("reflection_score") is not None:
-            reflection_note += f", score {metadata['reflection_score']:.2f}"
-        st.write(f"**Reflection:** {reflection_note}")
-
-        chunks = metadata.get("retrieved_chunks", [])
-        if not chunks:
-            st.caption("No chunks retrieved for this turn.")
-        for chunk in chunks:
-            st.progress(_clamped(chunk["score"]), text=f"{chunk['source']} — {chunk['score']:.2f}")
-            # Retrieved chunk text is arbitrary corpus content, not markdown
-            # we wrote — st.caption/st.write would parse a stray "#" as a
-            # heading. st.text renders it literally.
-            st.text(chunk["text"])
-    with raw_tab:
-        st.json(response)
+            chunks = metadata.get("retrieved_chunks", [])
+            if not chunks:
+                st.caption("No chunks retrieved for this turn.")
+            for chunk in chunks:
+                st.progress(
+                    _clamped(chunk["score"]), text=f"{chunk['source']} — {chunk['score']:.2f}"
+                )
+                # Retrieved chunk text is arbitrary corpus content, not
+                # markdown we wrote — st.caption/st.write would parse a
+                # stray "#" as a heading. st.text renders it literally.
+                st.text(chunk["text"])
+        with raw_tab:
+            st.json(response)
 
 
 # --- transcript + composer -----------------------------------------------------
 
 
 def send_question(question: str) -> None:
+    # Only queue the question here — appending it with `response: None` lets
+    # the *next* rerun paint the user bubble immediately, with a spinner in
+    # the assistant bubble below it (see `render_transcript`), instead of
+    # blocking on the API call before the question ever reaches the screen.
     question = question.strip()
     if not question:
         return
-    response = api_post("/query", {"question": question, **_current_flags()})
+    st.session_state.messages.append({"question": question, "response": None})
+
+
+def _fetch_response(index: int, entry: dict[str, Any]) -> None:
+    with st.spinner("Thinking…"):
+        response = api_post("/query", {"question": entry["question"], **_current_flags()})
     if response is None:
+        st.session_state.messages.pop(index)
+        st.rerun()
         return
-    st.session_state.messages.append({"question": question, "response": response})
-    # A resolved answer becomes the inspector's default content — a pending
-    # SQL turn has nothing inspectable yet, so the panel keeps showing
-    # whatever was selected before (or the empty-state prompt).
-    if not response.get("pending_sql"):
-        st.session_state.inspecting_index = len(st.session_state.messages) - 1
+    entry["response"] = response
+    st.rerun()
 
 
 def render_transcript() -> None:
@@ -359,10 +434,18 @@ def render_transcript() -> None:
         with st.chat_message("user"):
             st.write(entry["question"])
         with st.chat_message("assistant"):
-            render_response(index, entry)
+            if entry["response"] is None:
+                _fetch_response(index, entry)
+            else:
+                render_response(index, entry)
 
 
 def render_composer() -> None:
+    # Streamlit only docks `st.chat_input` to the bottom of the viewport
+    # (the ChatGPT/Claude-style "input stays put, transcript scrolls"
+    # behavior) when it's called at the top level — nested inside
+    # `st.columns`/`st.container`, as it used to be at one point, it just
+    # renders inline instead and scrolls away with the rest of the page.
     question = st.chat_input("Ask about your clusters…")
     if question:
         send_question(question)
@@ -376,7 +459,9 @@ def main() -> None:
     st.session_state.setdefault("token", None)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("messages", [])
-    st.session_state.setdefault("inspecting_index", None)
+
+    if not st.session_state.token:
+        _restore_session()
 
     if not st.session_state.token:
         render_auth_gate()
@@ -386,12 +471,8 @@ def main() -> None:
     st.title("Query Console")
     st.caption("Ask about your clusters, or approve a generated query.")
 
-    transcript_col, inspector_col = st.columns([2.5, 1], gap="large")
-    with transcript_col:
-        render_transcript()
-        render_composer()
-    with inspector_col:
-        render_inspector_panel()
+    render_transcript()
+    render_composer()
 
 
 if __name__ == "__main__":
