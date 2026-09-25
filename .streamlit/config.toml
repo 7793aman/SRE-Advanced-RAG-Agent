@@ -1,13 +1,13 @@
-# "Opaline" theme: a near-white neutral scale (not pure white) with one
-# coral-red accent reserved for interactive elements. Replaces the earlier
-# "Claude Dark" warm-dark/terracotta theme (issue #34) wholesale, not a
-# tweak — see spec.md's "Demo UI (issue #34)" section for the writeup.
+# "Arctic reflection" theme: dark navy base (replaces "Opaline" after it
+# read as too bright), a lighter steel-blue-grey sidebar, a mid steel-blue
+# accent, and near-white text. Full reskin again, not a tweak — see
+# spec.md's "Demo UI (issue #34)" section for the writeup.
 [theme]
-base = "light"
-primaryColor = "#FF634A"
-backgroundColor = "#F4F4F6"
-secondaryBackgroundColor = "#E7E7E7"
-textColor = "#1E1E1E"
+base = "dark"
+primaryColor = "#5289AD"
+backgroundColor = "#243C4C"
+secondaryBackgroundColor = "#698696"
+textColor = "#F4FCFB"
 font = "sans serif"
 
 [server]

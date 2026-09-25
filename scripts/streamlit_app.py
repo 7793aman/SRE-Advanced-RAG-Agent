@@ -172,7 +172,7 @@ def render_auth_gate() -> None:
             max-width: 420px;
             margin: 8vh auto 0;
             padding: 2.5rem 2rem 2rem;
-            border: 1px solid #D2D2D4;
+            border: 1px solid rgba(172, 188, 191, 0.25);
             border-radius: 12px;
         }
         </style>
@@ -183,7 +183,7 @@ def render_auth_gate() -> None:
         st.markdown(
             "<div style='text-align:center; font-size:2.75rem; line-height:1;'>🛰️</div>"
             "<h1 style='text-align:center; margin:0.5rem 0 0;'>Query Console</h1>"
-            "<p style='text-align:center; color:#6E6E72; "
+            "<p style='text-align:center; color:#ACBCBF; "
             "margin:0.35rem 0 1.5rem;'>Sign in to ask the Kubernetes ops assistant "
             "a question.</p>",
             unsafe_allow_html=True,
