@@ -24,6 +24,7 @@ such shared state to confuse).
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 import requests
@@ -34,6 +35,24 @@ from app.config import settings
 st.set_page_config(page_title="Query Console", page_icon="🛰️", layout="wide")
 
 _API = settings.streamlit_api_base_url
+
+# `st.session_state` is tied to the browser tab's live connection — a reload
+# opens a new one with empty state, which is why reloading used to bounce
+# back to the login screen every time. This is a process-lifetime, in-memory
+# map from a random session id (never the JWT itself) to the logged-in
+# token/username; the id lives in the URL's query string (`?sid=...`), which
+# *does* survive a reload, so `_restore_session` below can look the real
+# token back up instead of putting the token itself in the URL.
+#
+# A plain module-level dict won't do — Streamlit re-executes this whole
+# script top to bottom on *every* rerun (not just every reload), so a bare
+# `_SESSIONS = {}` here would reinitialize to empty on the very next rerun
+# after login, wiping the entry it just wrote. `st.cache_resource` is
+# Streamlit's own way to get a value that's actually built once and shared
+# for the life of the process, across every rerun and every session.
+@st.cache_resource
+def _session_store() -> dict[str, dict[str, str]]:
+    return {}
 
 _PRESETS = [
     "How do I debug a crashing pod?",
@@ -108,14 +127,35 @@ def api_post(path: str, body: dict[str, Any], auth: bool = True) -> dict[str, An
 # --- auth --------------------------------------------------------------------
 
 
+def _start_session(token: str, username: str) -> None:
+    sid = secrets.token_urlsafe(24)
+    _session_store()[sid] = {"token": token, "username": username}
+    st.session_state.token = token
+    st.session_state.username = username
+    st.query_params["sid"] = sid
+
+
+def _restore_session() -> None:
+    session = _session_store().get(st.query_params.get("sid", ""))
+    if session is None:
+        return
+    st.session_state.token = session["token"]
+    st.session_state.username = session["username"]
+
+
+def _end_session() -> None:
+    _session_store().pop(st.query_params.get("sid", ""), None)
+    st.query_params.clear()
+    st.session_state.clear()
+
+
 def _log_in_or_register(path: str, username: str, password: str) -> None:
     verb = "Logging in…" if path.endswith("login") else "Registering…"
     with st.spinner(verb):
         result = api_post(path, {"username": username, "password": password}, auth=False)
     if result is None:
         return
-    st.session_state.token = result["token"]
-    st.session_state.username = username
+    _start_session(result["token"], username)
     st.rerun()
 
 
@@ -184,7 +224,7 @@ def render_sidebar() -> None:
     with st.sidebar:
         st.caption(f"Signed in as **{st.session_state.username}**")
         if st.button("Log out"):
-            st.session_state.clear()
+            _end_session()
             st.rerun()
 
         st.divider()
@@ -269,11 +309,39 @@ def _resolve_sql(index: int, entry: dict[str, Any], query_id: str, approved: boo
 def render_pending_sql(index: int, entry: dict[str, Any], pending: dict[str, Any]) -> None:
     st.write(pending["explanation"])
     st.code(pending["sql"], language="sql")
-    approve_col, reject_col = st.columns(2)
-    if approve_col.button("Approve & run", key=f"approve_{pending['query_id']}", type="primary"):
-        _resolve_sql(index, entry, pending["query_id"], approved=True)
-    if reject_col.button("Reject", key=f"reject_{pending['query_id']}"):
-        _resolve_sql(index, entry, pending["query_id"], approved=False)
+    # `st.columns` always splits the row into equal-width tracks and a button
+    # doesn't stretch to fill its track, so any fixed ratio still leaves each
+    # button sitting at the *left* of its own too-wide track — which reads as
+    # mismatched sizes with a gap between them, worse the wider the chat
+    # bubble is. Scoping this row's columns to shrink to their buttons'
+    # actual content width (instead of splitting available space) is what
+    # actually puts them flush next to each other.
+    st.markdown(
+        """
+        <style>
+        [class*="st-key-sql_actions_"] [data-testid="stHorizontalBlock"] {
+            width: fit-content;
+            gap: 0.6rem;
+        }
+        [class*="st-key-sql_actions_"] [data-testid="stColumn"] {
+            width: fit-content !important;
+            flex: none !important;
+            min-width: 0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    # Keyed per query, not a shared literal key — two pending-SQL turns
+    # showing at once would otherwise collide on the same container key.
+    with st.container(key=f"sql_actions_{pending['query_id']}"):
+        approve_col, reject_col = st.columns(2)
+        if approve_col.button(
+            "Approve & run", key=f"approve_{pending['query_id']}", type="primary"
+        ):
+            _resolve_sql(index, entry, pending["query_id"], approved=True)
+        if reject_col.button("Reject", key=f"reject_{pending['query_id']}"):
+            _resolve_sql(index, entry, pending["query_id"], approved=False)
 
 
 def render_response(index: int, entry: dict[str, Any]) -> None:
@@ -391,6 +459,9 @@ def main() -> None:
     st.session_state.setdefault("token", None)
     st.session_state.setdefault("username", None)
     st.session_state.setdefault("messages", [])
+
+    if not st.session_state.token:
+        _restore_session()
 
     if not st.session_state.token:
         render_auth_gate()
