@@ -336,7 +336,12 @@ def render_inspector_panel() -> None:
 
     index = st.session_state.get("inspecting_index")
     messages = st.session_state.messages
-    if index is None or index >= len(messages) or messages[index]["response"].get("pending_sql"):
+    if (
+        index is None
+        or index >= len(messages)
+        or messages[index]["response"] is None
+        or messages[index]["response"].get("pending_sql")
+    ):
         st.caption("Click “Inspect response” on an answer to see its detail here.")
         return
 
@@ -370,19 +375,30 @@ def render_inspector_panel() -> None:
 
 
 def send_question(question: str) -> None:
+    # Only queue the question here — appending it with `response: None` lets
+    # the *next* rerun paint the user bubble immediately, with a spinner in
+    # the assistant bubble below it (see `render_transcript`), instead of
+    # blocking on the API call before the question ever reaches the screen.
     question = question.strip()
     if not question:
         return
+    st.session_state.messages.append({"question": question, "response": None})
+
+
+def _fetch_response(index: int, entry: dict[str, Any]) -> None:
     with st.spinner("Thinking…"):
-        response = api_post("/query", {"question": question, **_current_flags()})
+        response = api_post("/query", {"question": entry["question"], **_current_flags()})
     if response is None:
+        st.session_state.messages.pop(index)
+        st.rerun()
         return
-    st.session_state.messages.append({"question": question, "response": response})
+    entry["response"] = response
     # A resolved answer becomes the inspector's default content — a pending
     # SQL turn has nothing inspectable yet, so the panel keeps showing
     # whatever was selected before (or the empty-state prompt).
     if not response.get("pending_sql"):
-        st.session_state.inspecting_index = len(st.session_state.messages) - 1
+        st.session_state.inspecting_index = index
+    st.rerun()
 
 
 def render_transcript() -> None:
@@ -390,7 +406,10 @@ def render_transcript() -> None:
         with st.chat_message("user"):
             st.write(entry["question"])
         with st.chat_message("assistant"):
-            render_response(index, entry)
+            if entry["response"] is None:
+                _fetch_response(index, entry)
+            else:
+                render_response(index, entry)
 
 
 def render_composer() -> None:
