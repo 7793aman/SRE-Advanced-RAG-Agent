@@ -333,16 +333,21 @@ own ticket (issue #54, blocked by #33) and is still unspecified there.
   to idiomatic Streamlit (`st.sidebar` + `st.chat_message`), and keeps retrieval controls
   visible instead of hidden behind a settings icon. Transcript entries are a flat,
   rule-delineated log/timeline style, not chat bubbles.
-- **Theme — warm neutral palette, dark by default.** Background/text/borders follow
-  Claude.ai's own warm-grey palette (not a generic blue-grey or pure black/white), with a
-  single terracotta accent (`#E58762` on dark, `#BD5B3A` on light) reserved for
-  interactive/active elements only. Semantic colours (amber = pending approval, red =
-  reject/critical, green = approved/healthy) are separate from the accent and never
-  reused for anything else. Code/SQL blocks stay dark in both light and dark mode
-  (a deliberate signature, like a real terminal). Two lighter alternatives (a warm cream
-  and a muted "soothing" sage) were prototyped and are worth keeping as a
-  theme-switcher option, not just thrown away — implementation should decide whether
-  that's in scope for v1 or a follow-up.
+- **Theme — "Opaline": near-white neutral scale, light by default.** Reskinned wholesale
+  from the original "Claude Dark" warm-grey/terracotta theme after seeing the palette
+  live (not a tweak to it — a full replacement, background/text/borders/accent all
+  changed together so nothing from the old palette lingers half-applied). Backgrounds
+  step through three near-white greys (`#F4F4F6` page, `#E7E7E7` sidebar/secondary
+  surfaces, `#D2D2D4` borders/dividers — deliberately not pure white, so surfaces still
+  read as distinct from each other), text is a near-black `#1E1E1E` (body) /
+  `#6E6E72` (secondary/caption), and a single coral-red accent (`#FF634A`) is reserved
+  for interactive/active elements only — same "one accent, nothing else uses it" rule
+  the old theme had, just a different colour. Code/SQL blocks still stay dark regardless
+  of the surrounding light theme (kept from the original decision — still reads as a
+  deliberate terminal-style signature, not a leftover). The old theme's semantic colours
+  (amber/red/green for pending/reject/approve) are untouched — they're Streamlit's own
+  built-in alert colors, orthogonal to this custom 5-token palette, not part of either
+  theme.
 - **Response rendering differs by `metadata.route`**, using a glyph instead of a text
   badge as the primary signal (shape encodes state, not just colour): `●` filled =
   single-source resolved answer (`rag`, `sql`), `◐` half-filled = `hybrid` (merged

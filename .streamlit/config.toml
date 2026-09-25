@@ -1,12 +1,13 @@
-# Issue #34's "Claude Dark" theme: warm dark grey (not near-black), one
-# terracotta accent reserved for interactive elements. See spec.md's
-# "Demo UI (issue #34)" section for the full design writeup.
+# "Opaline" theme: a near-white neutral scale (not pure white) with one
+# coral-red accent reserved for interactive elements. Replaces the earlier
+# "Claude Dark" warm-dark/terracotta theme (issue #34) wholesale, not a
+# tweak — see spec.md's "Demo UI (issue #34)" section for the writeup.
 [theme]
-base = "dark"
-primaryColor = "#E58762"
-backgroundColor = "#1F1E1B"
-secondaryBackgroundColor = "#26251F"
-textColor = "#F2EFE7"
+base = "light"
+primaryColor = "#FF634A"
+backgroundColor = "#F4F4F6"
+secondaryBackgroundColor = "#E7E7E7"
+textColor = "#1E1E1E"
 font = "sans serif"
 
 [server]
