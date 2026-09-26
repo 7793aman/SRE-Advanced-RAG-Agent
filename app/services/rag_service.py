@@ -100,10 +100,13 @@ def _sources(chunks: list[RetrievedChunk]) -> list[str]:
 
 def _retrieve(
     question: str, query_vector: list[float], flags: dict[str, Any]
-) -> tuple[list[RetrievedChunk], bool]:
-    """Returns the chunks plus whether CRAG's web fallback actually
-    contributed to them (issue #34's `ResponseMetadata.used_web_fallback`).
-    False whenever `enable_crag` is off — there's no correction to report."""
+) -> tuple[list[RetrievedChunk], bool, str]:
+    """Returns the chunks, whether CRAG's web fallback actually contributed
+    to them (issue #34's `ResponseMetadata.used_web_fallback`, False whenever
+    `enable_crag` is off), and which retrieval path actually ran (HyDE /
+    dense / sparse / hybrid, "+reranked" appended if rerank fired) — so a
+    toggle that changes *how* retrieval happens has something to show for it
+    on the response, not just a toggle that silently did or didn't fire."""
     top_k = int(flags.get("top_k", 5))
     search_mode = flags.get("search_mode", "dense")
     enable_rerank = flags.get("enable_rerank", False)
@@ -116,15 +119,20 @@ def _retrieve(
 
     if enable_hyde:
         chunks = hyde_search(question, top_k=retrieve_k)
+        retrieval_path = "hyde"
     elif search_mode == "sparse":
         chunks = sparse_search(question, top_k=retrieve_k)
+        retrieval_path = "sparse"
     elif search_mode == "hybrid":
         chunks = hybrid_search(question, query_vector, top_k=retrieve_k)
+        retrieval_path = "hybrid"
     else:
         chunks = search(query_vector, top_k=retrieve_k)
+        retrieval_path = "dense"
 
     if enable_rerank:
         chunks = rerank(question, chunks)
+        retrieval_path += "+reranked"
 
     chunks = chunks[:top_k]
 
@@ -133,16 +141,16 @@ def _retrieve(
         correction = evaluate_and_correct(question, chunks, top_k=top_k)
         chunks, used_web_fallback = correction.chunks, correction.used_web_fallback
 
-    return chunks, used_web_fallback
+    return chunks, used_web_fallback, retrieval_path
 
 
 def _retrieve_and_generate(
     question: str, flags: dict[str, Any]
-) -> tuple[list[RetrievedChunk], LLMResponse, bool]:
+) -> tuple[list[RetrievedChunk], LLMResponse, bool, str]:
     query_vector = embed_texts([question])[0]
-    chunks, used_web_fallback = _retrieve(question, query_vector, flags)
+    chunks, used_web_fallback, retrieval_path = _retrieve(question, query_vector, flags)
     llm_response = generate_text(_build_prompt(question, chunks), system_prompt=SYSTEM_PROMPT)
-    return chunks, llm_response, used_web_fallback
+    return chunks, llm_response, used_web_fallback, retrieval_path
 
 
 def run_rag_with_trace(
@@ -158,6 +166,7 @@ def run_rag_with_trace(
     skip_retrieval = enable_adaptive_retrieval and not needs_retrieval(question)
 
     used_web_fallback = False
+    retrieval_path: str | None = None
 
     if skip_retrieval:
         route = "rag_general_knowledge"
@@ -165,7 +174,9 @@ def run_rag_with_trace(
         llm_response = generate_text(question, system_prompt=GENERAL_KNOWLEDGE_SYSTEM_PROMPT)
     else:
         route = "rag"
-        chunks, llm_response, used_web_fallback = _retrieve_and_generate(question, flags)
+        chunks, llm_response, used_web_fallback, retrieval_path = _retrieve_and_generate(
+            question, flags
+        )
 
     reflection_iterations = 0
     reflection_score: float | None = None
@@ -186,7 +197,7 @@ def run_rag_with_trace(
                     refined_question, system_prompt=GENERAL_KNOWLEDGE_SYSTEM_PROMPT
                 )
             else:
-                chunks, llm_response, retry_web_fallback = _retrieve_and_generate(
+                chunks, llm_response, retry_web_fallback, retrieval_path = _retrieve_and_generate(
                     refined_question, flags
                 )
                 # Once any attempt (initial or a retry) actually used a web
@@ -214,6 +225,7 @@ def run_rag_with_trace(
             reflection_score=reflection_score,
             refined_question=refined_question,
             used_web_fallback=used_web_fallback,
+            retrieval_path=retrieval_path,
         ),
     )
     return response, chunks

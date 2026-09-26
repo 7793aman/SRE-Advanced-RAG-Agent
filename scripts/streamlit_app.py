@@ -400,6 +400,12 @@ def render_response(index: int, entry: dict[str, Any]) -> None:
         formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
         with formatted_tab:
             st.write(f"**Cache:** {'hit' if response['cache_hit'] else 'miss'}")
+            # Toggling HyDE or Rerank otherwise has no visible effect on the
+            # response — this is that confirmation. None when retrieval
+            # never ran at all (adaptive retrieval's general-knowledge skip,
+            # a pure SQL answer), so there's nothing to show.
+            if metadata.get("retrieval_path"):
+                st.write(f"**Retrieval:** {metadata['retrieval_path']}")
             reflection_note = f"{metadata['reflection_iterations']} iteration(s)"
             if metadata.get("reflection_score") is not None:
                 reflection_note += f", score {metadata['reflection_score']:.2f}"

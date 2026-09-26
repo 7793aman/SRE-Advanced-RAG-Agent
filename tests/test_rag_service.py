@@ -384,6 +384,90 @@ def test_hyde_result_is_still_cut_to_top_k(
     assert len(chunks) == 3
 
 
+# --- retrieval_path: what actually ran, surfaced on the response (HyDE and
+# rerank used to have zero visible confirmation on the UI that toggling them
+# had any effect) ------------------------------------------------------------
+
+
+def test_retrieval_path_is_dense_by_default(
+    fresh_cache, fake_search, fake_embed, fake_generate
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    response, _ = run_rag_with_trace("What is a Pod?", _FLAGS)
+
+    assert response.metadata.retrieval_path == "dense"
+
+
+def test_retrieval_path_reflects_sparse_search_mode(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.sparse_search", lambda *a, **k: list(_CHUNKS))
+
+    response, _ = run_rag_with_trace("What is a Pod?", {**_FLAGS, "search_mode": "sparse"})
+
+    assert response.metadata.retrieval_path == "sparse"
+
+
+def test_retrieval_path_reflects_hybrid_search_mode(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.hybrid_search", lambda *a, **k: list(_CHUNKS))
+
+    response, _ = run_rag_with_trace("What is a Pod?", {**_FLAGS, "search_mode": "hybrid"})
+
+    assert response.metadata.retrieval_path == "hybrid"
+
+
+def test_retrieval_path_is_hyde_regardless_of_search_mode(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HyDE takes over retrieval entirely — the path it reports must say so
+    even when search_mode is left at something else, the same way HyDE
+    itself overrides search_mode's dense/sparse/hybrid branch."""
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.hyde_search", lambda *a, **k: list(_CHUNKS))
+
+    response, _ = run_rag_with_trace(
+        "Why is my pod OOMKilled?", {**_FLAGS, "enable_hyde": True, "search_mode": "hybrid"}
+    )
+
+    assert response.metadata.retrieval_path == "hyde"
+
+
+def test_retrieval_path_appends_reranked_suffix_when_rerank_enabled(
+    fresh_cache, fake_search, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.rerank", lambda question, chunks: chunks)
+
+    response, _ = run_rag_with_trace("What is a Pod?", {**_FLAGS, "enable_rerank": True})
+
+    assert response.metadata.retrieval_path == "dense+reranked"
+
+
+def test_retrieval_path_is_none_when_adaptive_retrieval_skips_retrieval_entirely(
+    fresh_cache, fake_embed, fake_generate, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing was retrieved, so there's no path to report — not a made-up
+    value, the same honesty `used_web_fallback` already gets in this case."""
+    from app.services.rag_service import run_rag_with_trace
+
+    monkeypatch.setattr("app.services.rag_service.needs_retrieval", lambda *a, **k: False)
+
+    response, _ = run_rag_with_trace(
+        "What is 2 + 2?", {**_FLAGS, "enable_adaptive_retrieval": True}
+    )
+
+    assert response.metadata.retrieval_path is None
+
+
 # --- enable_crag: grade the final top_k chunks, correct on a weak grade ----
 
 
