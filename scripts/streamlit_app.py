@@ -507,15 +507,27 @@ def send_question(question: str) -> None:
     # the *next* rerun paint the user bubble immediately, with a spinner in
     # the assistant bubble below it (see `render_transcript`), instead of
     # blocking on the API call before the question ever reaches the screen.
+    #
+    # `flags` is snapshotted *now*, not re-read from session_state later in
+    # `_fetch_response`. A preset button sits above the retrieval-settings
+    # toggles in the sidebar and calls `st.rerun()` the moment it's clicked
+    # — which aborts this script run before those toggles render again this
+    # pass. Streamlit then resets their session_state for not having been
+    # re-registered in the run that just ended, so a later re-read in
+    # `_fetch_response` would silently see each toggle's default instead of
+    # what the user actually had set (HyDE, rerank, etc. all revert to off).
+    # Capturing them here, before that rerun fires, sidesteps it entirely.
     question = question.strip()
     if not question:
         return
-    st.session_state.messages.append({"question": question, "response": None})
+    st.session_state.messages.append(
+        {"question": question, "response": None, "flags": _current_flags()}
+    )
 
 
 def _fetch_response(index: int, entry: dict[str, Any]) -> None:
     with st.spinner("Thinking…"):
-        response = api_post("/query", {"question": entry["question"], **_current_flags()})
+        response = api_post("/query", {"question": entry["question"], **entry["flags"]})
     if response is None:
         # api_post already showed *why* via st.error, but that render is
         # about to be discarded by the rerun below — dropping the message
