@@ -46,6 +46,17 @@ _THEME_CSS = """
     font-size: 1.05rem;
     line-height: 1.65;
 }
+
+/* st.divider()'s <hr> ships with a 32px top+bottom margin, stacked on top
+   of the sidebar's own 16px gap between every element — two dividers alone
+   cost ~200px of near-empty space, forcing the sidebar to scroll even
+   though nothing in it actually needs that much room. */
+[data-testid="stSidebar"] hr {
+    margin: 0.75rem 0;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap: 0.6rem;
+}
 </style>
 """
 
