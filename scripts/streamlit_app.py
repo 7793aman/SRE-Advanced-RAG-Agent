@@ -262,17 +262,6 @@ def _current_flags() -> dict[str, Any]:
 
 def render_sidebar() -> None:
     with st.sidebar:
-        # A small mark at the top gives the sidebar an actual header instead
-        # of starting cold on "Signed in as..." — the same satellite mark
-        # the auth gate uses, so the two screens read as one product.
-        st.markdown(
-            "<div style='text-align:center; padding-top:0.25rem;'>"
-            "<span style='font-size:1.75rem; line-height:1;'>🛰️</span>"
-            "<div style='font-weight:600; margin-top:0.2rem;'>Query Console</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        st.divider()
         st.caption(f"Signed in as **{st.session_state.username}**")
 
         st.subheader("Try a question")
