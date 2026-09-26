@@ -60,6 +60,16 @@ _THEME_CSS = """
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
     gap: 1rem;
 }
+
+/* Pushes the Log out button (wrapped in st.container(key="sidebar_footer")
+   in render_sidebar) to the bottom of the sidebar instead of sitting right
+   under the retrieval settings with empty space below it — the sidebar's
+   own vertical block is already a flex column stretched to the sidebar's
+   full height, so this is the standard flexbox "stick to the end" trick,
+   not a fixed/absolute position hack. */
+.st-key-sidebar_footer {
+    margin-top: auto;
+}
 </style>
 """
 
@@ -252,12 +262,19 @@ def _current_flags() -> dict[str, Any]:
 
 def render_sidebar() -> None:
     with st.sidebar:
-        st.caption(f"Signed in as **{st.session_state.username}**")
-        if st.button("Log out"):
-            _end_session()
-            st.rerun()
-
+        # A small mark at the top gives the sidebar an actual header instead
+        # of starting cold on "Signed in as..." — the same satellite mark
+        # the auth gate uses, so the two screens read as one product.
+        st.markdown(
+            "<div style='text-align:center; padding-top:0.25rem;'>"
+            "<span style='font-size:1.75rem; line-height:1;'>🛰️</span>"
+            "<div style='font-weight:600; margin-top:0.2rem;'>Query Console</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
         st.divider()
+        st.caption(f"Signed in as **{st.session_state.username}**")
+
         st.subheader("Try a question")
         for question in _PRESETS:
             if st.button(question, key=f"preset_{question}", use_container_width=True):
@@ -308,6 +325,17 @@ def render_sidebar() -> None:
             help="Skips the corpus search entirely when the question doesn't need it.",
         )
         st.number_input("top_k", min_value=1, max_value=50, value=5, key="top_k")
+
+        # Pinned to the bottom of the sidebar (see the sidebar_footer CSS
+        # rule) instead of sitting up top where a fixed-height viewport
+        # otherwise leaves it stranded next to a lot of empty space below
+        # the settings — logging out is the one action that belongs at the
+        # edge of the screen, not mixed in with the retrieval controls.
+        with st.container(key="sidebar_footer"):
+            st.divider()
+            if st.button("Log out"):
+                _end_session()
+                st.rerun()
 
 
 # --- response rendering --------------------------------------------------------
