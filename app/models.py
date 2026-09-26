@@ -143,6 +143,13 @@ class ResponseMetadata(BaseModel):
     # graceful degradation (Tavily unconfigured/failed) that kept the corpus
     # chunks unchanged.
     used_web_fallback: bool = False
+    # Which retrieval path actually ran — HyDE / dense / sparse / hybrid,
+    # each optionally suffixed "+reranked" — so toggling HyDE or Rerank on
+    # the UI has some visible confirmation it did something, instead of the
+    # choice being made and then thrown away. None when retrieval never ran
+    # at all (adaptive retrieval's general-knowledge skip, or a pure SQL
+    # answer) — there's no path to report there, so this doesn't invent one.
+    retrieval_path: str | None = None
 
 
 class PendingSQLBlock(BaseModel):
