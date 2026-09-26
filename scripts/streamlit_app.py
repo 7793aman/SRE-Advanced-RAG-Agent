@@ -47,15 +47,18 @@ _THEME_CSS = """
     line-height: 1.65;
 }
 
-/* st.divider()'s <hr> ships with a 32px top+bottom margin, stacked on top
-   of the sidebar's own 16px gap between every element — two dividers alone
-   cost ~200px of near-empty space, forcing the sidebar to scroll even
-   though nothing in it actually needs that much room. */
+/* st.divider()'s <hr> ships with its own 32px top+bottom margin *on top of*
+   the sidebar's own gap between every element — two spacing systems
+   stacking, which is why a divider stood out with a much bigger gap than
+   anywhere else. Zeroing the hr's own margin makes the single flex `gap`
+   below the only source of spacing in the sidebar, so every gap — around a
+   divider or not — is the same size, comfortably larger than the old 16px
+   default without needing a scroll. */
 [data-testid="stSidebar"] hr {
-    margin: 0.75rem 0;
+    margin: 0;
 }
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-    gap: 0.6rem;
+    gap: 1rem;
 }
 </style>
 """
