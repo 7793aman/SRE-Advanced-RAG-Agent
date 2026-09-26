@@ -46,6 +46,45 @@ _THEME_CSS = """
     font-size: 1.05rem;
     line-height: 1.65;
 }
+
+/* st.divider()'s <hr> ships with its own 32px top+bottom margin *on top of*
+   the sidebar's own gap between every element — two spacing systems
+   stacking, which is why a divider stood out with a much bigger gap than
+   anywhere else. Zeroing the hr's own margin makes the single flex `gap`
+   below the only source of spacing in the sidebar, so every gap — around a
+   divider or not — is the same size, comfortably larger than the old 16px
+   default without needing a scroll. */
+[data-testid="stSidebar"] hr {
+    margin: 0;
+}
+/* A section heading (st.subheader) gets deliberately *more* space above it
+   than a gap between two plain elements — that's what actually signals
+   "new section starts here" instead of everything reading as one
+   undifferentiated list. st.subheader's own default padding-top did this
+   by accident (an arbitrary 12px nobody chose); this replaces it with a
+   fixed, intentional amount on top of the uniform gap. */
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] h4,
+[data-testid="stSidebar"] h5,
+[data-testid="stSidebar"] h6 {
+    padding-top: 0.75rem;
+    margin-top: 0;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap: 1rem;
+}
+
+/* Pushes the Log out button (wrapped in st.container(key="sidebar_footer")
+   in render_sidebar) to the bottom of the sidebar instead of sitting right
+   under the retrieval settings with empty space below it — the sidebar's
+   own vertical block is already a flex column stretched to the sidebar's
+   full height, so this is the standard flexbox "stick to the end" trick,
+   not a fixed/absolute position hack. */
+.st-key-sidebar_footer {
+    margin-top: auto;
+}
 </style>
 """
 
@@ -251,12 +290,22 @@ def _current_flags() -> dict[str, Any]:
 
 def render_sidebar() -> None:
     with st.sidebar:
+        # A plain content element, not wrapped in its own padded container —
+        # the uniform 1rem gap CSS below spaces it from "Signed in as..."
+        # exactly like every other pair of elements in the sidebar, instead
+        # of stacking extra margin of its own on top of that gap.
+        # A magnifying glass, not an arbitrary icon — this tool exists to
+        # investigate incidents (debug a pod, find which cluster, trace a
+        # root cause), so the mark matches what the app actually does.
+        st.markdown(
+            "<div style='display:flex; align-items:center; gap:0.4rem; "
+            "font-size:0.75rem; font-weight:600; letter-spacing:0.12em; "
+            "color:#D97757;'>"
+            "<span style='font-size:1rem;'>🔍</span>QUERY CONSOLE</div>",
+            unsafe_allow_html=True,
+        )
         st.caption(f"Signed in as **{st.session_state.username}**")
-        if st.button("Log out"):
-            _end_session()
-            st.rerun()
 
-        st.divider()
         st.subheader("Try a question")
         for question in _PRESETS:
             if st.button(question, key=f"preset_{question}", use_container_width=True):
@@ -307,6 +356,17 @@ def render_sidebar() -> None:
             help="Skips the corpus search entirely when the question doesn't need it.",
         )
         st.number_input("top_k", min_value=1, max_value=50, value=5, key="top_k")
+
+        # Pinned to the bottom of the sidebar (see the sidebar_footer CSS
+        # rule) instead of sitting up top where a fixed-height viewport
+        # otherwise leaves it stranded next to a lot of empty space below
+        # the settings — logging out is the one action that belongs at the
+        # edge of the screen, not mixed in with the retrieval controls.
+        with st.container(key="sidebar_footer"):
+            st.divider()
+            if st.button("Log out"):
+                _end_session()
+                st.rerun()
 
 
 # --- response rendering --------------------------------------------------------
