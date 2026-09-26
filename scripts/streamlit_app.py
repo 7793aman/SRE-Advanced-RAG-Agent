@@ -57,6 +57,17 @@ _THEME_CSS = """
 [data-testid="stSidebar"] hr {
     margin: 0;
 }
+/* st.subheader()'s <h3> carries its own 12px padding-top the same way — any
+   heading is otherwise a bigger gap than every other pair of elements. */
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] h4,
+[data-testid="stSidebar"] h5,
+[data-testid="stSidebar"] h6 {
+    padding-top: 0;
+    margin-top: 0;
+}
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
     gap: 1rem;
 }
@@ -262,6 +273,15 @@ def _current_flags() -> dict[str, Any]:
 
 def render_sidebar() -> None:
     with st.sidebar:
+        # A plain content element, not wrapped in its own padded container —
+        # the uniform 1rem gap CSS below spaces it from "Signed in as..."
+        # exactly like every other pair of elements in the sidebar, instead
+        # of stacking extra margin of its own on top of that gap.
+        st.markdown(
+            "<div style='font-size:0.75rem; font-weight:600; "
+            "letter-spacing:0.12em; color:#D97757;'>QUERY CONSOLE</div>",
+            unsafe_allow_html=True,
+        )
         st.caption(f"Signed in as **{st.session_state.username}**")
 
         st.subheader("Try a question")
