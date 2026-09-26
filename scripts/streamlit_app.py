@@ -133,6 +133,17 @@ def api_post(path: str, body: dict[str, Any], auth: bool = True) -> dict[str, An
         st.error(f"Couldn't reach the API at {_API}: {exc}")
         return None
 
+    # A 401 on an authenticated call means the token itself is invalid or
+    # expired (JWTs here last settings.jwt_expiration_minutes, 60 by
+    # default) — no retry will ever succeed, so force a real login instead
+    # of leaving the chat silently failing forever. Login/register itself
+    # (auth=False) still falls through to the plain error below, since a
+    # 401 there just means a wrong password, not a dead session.
+    if auth and response.status_code == 401:
+        _end_session()
+        st.session_state["session_expired_notice"] = True
+        st.rerun()
+
     if not response.ok:
         st.error(_error_detail(response))
         return None
@@ -196,6 +207,8 @@ def render_auth_gate() -> None:
         unsafe_allow_html=True,
     )
     with st.container(key="auth_card"):
+        if st.session_state.pop("session_expired_notice", False):
+            st.info("Your session expired — log in again to keep asking questions.")
         st.markdown(
             "<div style='text-align:center; font-size:2.75rem; line-height:1;'>🛰️</div>"
             "<h1 style='text-align:center; margin:0.5rem 0 0;'>Query Console</h1>"
@@ -444,7 +457,12 @@ def _fetch_response(index: int, entry: dict[str, Any]) -> None:
     with st.spinner("Thinking…"):
         response = api_post("/query", {"question": entry["question"], **_current_flags()})
     if response is None:
-        st.session_state.messages.pop(index)
+        # api_post already showed *why* via st.error, but that render is
+        # about to be discarded by the rerun below — dropping the message
+        # here used to make a failed question vanish with no trace at all,
+        # question gone, no error, nothing. Keeping it and marking it
+        # failed means the transcript actually shows what happened.
+        entry["failed"] = True
         st.rerun()
         return
     entry["response"] = response
@@ -456,7 +474,9 @@ def render_transcript() -> None:
         with st.chat_message("user"):
             st.write(entry["question"])
         with st.chat_message("assistant"):
-            if entry["response"] is None:
+            if entry.get("failed"):
+                st.error("Couldn't get an answer for this one — try asking again.")
+            elif entry["response"] is None:
                 _fetch_response(index, entry)
             else:
                 render_response(index, entry)
