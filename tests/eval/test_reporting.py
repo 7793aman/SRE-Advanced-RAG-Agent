@@ -8,7 +8,9 @@ docstring in eval/reporting.py.
 
 from __future__ import annotations
 
-from eval.reporting import aggregate, expected_outcome_mismatches, golden_passed
+import pytest
+
+from eval.reporting import aggregate, expected_outcome_mismatches, golden_passed, print_table
 
 _BASE_ROW = {
     "id": "q-001",
@@ -149,3 +151,33 @@ def test_aggregate_handles_no_rows() -> None:
     assert agg["faithfulness"] is None
     assert agg["passed"] == 0
     assert agg["failed"] == 0
+
+
+def test_print_table_shows_na_not_a_fabricated_zero_for_an_unscored_row(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    # q-041-style row: retrieval correctly skipped, ragas never scored it,
+    # route_check is what makes it a genuine PASS.
+    unscored_row = {
+        **_BASE_ROW,
+        "id": "q-041",
+        "demonstrates_feature": "adaptive_retrieval",
+        "ragas_metrics": None,
+        "route_check": {"passed": True, "actual_route": "x", "expected_route": "x"},
+    }
+    payload = {
+        "profile": "naive",
+        "mode": "service",
+        "skipped": [],
+        "rows": [unscored_row],
+        "aggregate": aggregate([unscored_row]),
+    }
+
+    print_table(payload)
+
+    out = capsys.readouterr().out
+    assert "| q-041 |" in out
+    row_line = next(line for line in out.splitlines() if line.startswith("| q-041 |"))
+    assert "n/a" in row_line
+    assert "0.00" not in row_line
+    assert "PASS" in row_line

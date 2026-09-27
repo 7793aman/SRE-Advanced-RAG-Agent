@@ -6,6 +6,7 @@ outside pytest's reach (needs OpenAI + a running app).
 
 from __future__ import annotations
 
+import datetime
 import json
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ import pytest
 
 from app.models import ChatResponse, ResponseMetadata
 from eval.invokers import SkippedIntent
-from eval.run_ragas import build_row, main, run_eval
+from eval.run_ragas import build_row, default_output_path, main, run_eval
 from eval.schema import Golden
 
 _GOLDEN = Golden(
@@ -72,6 +73,16 @@ def _response(
 class _FakeChunk:
     def __init__(self, text: str) -> None:
         self.text = text
+
+
+def test_default_output_path_is_unique_to_the_microsecond_not_just_the_second() -> None:
+    t1 = datetime.datetime(2026, 1, 1, 12, 0, 0, 100000, tzinfo=datetime.UTC)
+    t2 = datetime.datetime(2026, 1, 1, 12, 0, 0, 200000, tzinfo=datetime.UTC)
+    p1 = default_output_path(t1, "naive")
+    p2 = default_output_path(t2, "naive")
+    assert p1 != p2
+    # Still lexically sorts newest-last, since find_latest() just sorts filenames.
+    assert sorted([str(p2), str(p1)]) == [str(p1), str(p2)]
 
 
 def test_build_row_shapes_the_fields_ragas_and_post_checks_need() -> None:
@@ -213,6 +224,62 @@ def test_main_writes_a_results_json_with_the_expected_shape(
     assert payload["rows"][0]["ragas_metrics"]["faithfulness"] == 1.0
     assert payload["aggregate"]["passed"] == 1
     assert payload["expected_outcome_mismatches"] == []
+
+
+def test_main_flags_a_config_skip_as_unverified_but_not_an_intent_skip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    questions_path = tmp_path / "goldens.yaml"
+    questions_path.write_text(
+        "- id: q-017\n"
+        '  question: "What is the weather?"\n'
+        "  intent: web_fallback\n"
+        "  golden_sources: [tavily_web]\n"
+        "  golden_answer_keywords: [weather]\n"
+        "  demonstrates_feature: crag\n"
+        "  expected_baseline: fail\n"
+        "  expected_with_feature: pass\n"
+        "  notes: crag case\n"
+        "- id: q-025\n"
+        '  question: "How many pods?"\n'
+        "  intent: sql\n"
+        "  golden_sources: [query_results]\n"
+        "  golden_answer_keywords: [pod]\n"
+        "  demonstrates_feature: sql\n"
+        "  expected_baseline: pass\n"
+        "  expected_with_feature: pass\n"
+        "  notes: sql case\n"
+    )
+    output_path = tmp_path / "result.json"
+
+    class _AllSkippingInvoker:
+        def invoke(self, question: str, flags: dict, intent: str) -> Any:
+            if intent == "sql":
+                raise SkippedIntent("intent=sql not supported in service mode")
+            raise SkippedIntent("tavily_unset: TAVILY_API_KEY not configured")
+
+    monkeypatch.setattr("eval.run_ragas.ServiceInvoker", lambda: _AllSkippingInvoker())
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "run_ragas",
+            "--profile",
+            "naive",
+            "--questions",
+            str(questions_path),
+            "--output",
+            str(output_path),
+        ],
+    )
+
+    main()
+
+    payload = json.loads(output_path.read_text())
+    assert [s["id"] for s in payload["skipped"]] == ["q-017", "q-025"]
+    # The sql skip is the accepted, permanent limitation — not "unverified".
+    # The tavily skip is a config problem — a real "this wasn't checked" gap.
+    assert [s["id"] for s in payload["unverified"]] == ["q-017"]
+    assert "q-017" in capsys.readouterr().err
 
 
 def test_main_warns_loudly_on_stderr_when_a_golden_errors_not_just_skips(

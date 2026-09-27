@@ -81,16 +81,24 @@ def print_table(payload: dict) -> None:
     print("| id | feature | faith | ctx_prec | ctx_recall | ans_rel | forbidden | pass? |")
     print("|----|---------|-------|----------|------------|---------|-----------|-------|")
 
+    def _fmt(m: dict | None, key: str) -> str:
+        # m is None for a row Ragas never scored (e.g. retrieval correctly
+        # skipped, adaptive_retrieval's route_check case) — "n/a" here, not a
+        # fabricated 0.00 that reads as "the judge gave this a zero."
+        if m is None:
+            return "n/a"
+        return f"{m[key]:.2f}"
+
     for r in payload["rows"]:
-        m = r.get("ragas_metrics") or {}
+        m = r.get("ragas_metrics")
         fb = "OK" if r["forbidden_check"]["passed"] else f"FAIL: {r['forbidden_check']['hits']}"
         verdict = "PASS" if golden_passed(r) else "FAIL"
         print(
             f"| {r['id']} | {r['demonstrates_feature']} | "
-            f"{m.get('faithfulness', 0):.2f} | "
-            f"{m.get('context_precision', 0):.2f} | "
-            f"{m.get('context_recall', 0):.2f} | "
-            f"{m.get('answer_relevancy', 0):.2f} | {fb} | {verdict} |"
+            f"{_fmt(m, 'faithfulness')} | "
+            f"{_fmt(m, 'context_precision')} | "
+            f"{_fmt(m, 'context_recall')} | "
+            f"{_fmt(m, 'answer_relevancy')} | {fb} | {verdict} |"
         )
 
     if not payload["rows"]:

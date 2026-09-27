@@ -52,6 +52,13 @@ def compare_runs(naive: dict, all_run: dict) -> dict:
             f"(expected {mismatch['expected']})"
         )
 
+    # A golden that never ran (e.g. TAVILY_API_KEY unset in a fresh worktree
+    # silently drops every CRAG golden) isn't in `rows`, so it can never show up
+    # as an expected_outcome_mismatch — that check only looks at rows that
+    # actually ran. A "PASS" that never exercised a whole technique isn't real.
+    for skip in all_run.get("unverified", []):
+        regressions.append(f"{skip['id']} never ran under 'all': {skip['reason']}")
+
     return {"ok": not regressions, "regressions": regressions, **deltas}
 
 

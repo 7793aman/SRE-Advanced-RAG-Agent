@@ -89,6 +89,25 @@ def test_compare_runs_flags_an_expected_baseline_fail_golden_that_did_not_flip()
     assert any("q-005" in r for r in result["regressions"])
 
 
+def test_compare_runs_flags_a_golden_that_never_ran_under_all() -> None:
+    # e.g. TAVILY_API_KEY unset silently drops every CRAG golden from `rows` —
+    # expected_outcome_mismatches can't catch that (it only looks at rows that
+    # actually ran), so `unverified` is checked separately.
+    never_ran = {
+        **_ALL_BETTER,
+        "unverified": [{"id": "q-017", "reason": "tavily_unset: TAVILY_API_KEY not configured"}],
+    }
+    result = compare_runs(_NAIVE, never_ran)
+    assert result["ok"] is False
+    assert any("q-017" in r for r in result["regressions"])
+
+
+def test_compare_runs_ok_when_all_has_no_unverified_goldens() -> None:
+    with_empty_unverified = {**_ALL_BETTER, "unverified": []}
+    result = compare_runs(_NAIVE, with_empty_unverified)
+    assert result["ok"] is True
+
+
 def test_find_latest_picks_the_newest_matching_timestamped_file(tmp_path: Path) -> None:
     (tmp_path / "20260101T000000Z_naive.json").write_text("{}")
     newest = tmp_path / "20260901T000000Z_naive.json"

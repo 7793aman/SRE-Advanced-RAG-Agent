@@ -55,6 +55,15 @@ def build_row(golden: Golden, resp: ChatResponse, chunks: list[RetrievedChunk]) 
     }
 
 
+def default_output_path(timestamp: datetime.datetime, profile: str) -> Path:
+    # Microsecond precision, not just seconds — two runs of the same profile
+    # started within the same second (a retry loop, a script) would otherwise
+    # get the identical filename and the second write silently clobbers the
+    # first with no warning. find_latest() in eval/diff.py sorts by filename,
+    # so this still sorts correctly newest-last.
+    return Path(f"eval/results/{timestamp:%Y%m%dT%H%M%S%f}Z_{profile}.json")
+
+
 def run_eval(goldens: list[Golden], flags: dict, invoker: Any) -> tuple[list[dict], list[dict]]:
     rows: list[dict] = []
     skipped: list[dict] = []
@@ -109,19 +118,24 @@ def main() -> None:
 
     rows, skipped = run_eval(goldens, flags, invoker)
 
-    # "error: ..." skips are unexpected exceptions (a real bug), not the expected,
-    # structural skips (unsupported intent, tavily unset). aggregate()/golden_passed()
-    # only ever look at `rows`, so a run where most goldens errored out could
-    # otherwise still print a clean 100%-pass table — surface this loudly instead
-    # of leaving it buried in the JSON's `skipped` list.
-    error_skips = [s for s in skipped if s["reason"].startswith("error:")]
-    if error_skips:
+    # Skips split into two kinds. "intent=..." is the one permanent, accepted
+    # limitation (sql/hybrid need the graph's HTTP approval flow — see
+    # ServiceInvoker's docstring) — expected, not a problem. Everything else
+    # (tavily_unset, "error: ...") means a golden this run *claims* to cover
+    # never actually ran — e.g. a fresh worktree missing TAVILY_API_KEY (see
+    # this repo's CLAUDE.md .env note) silently drops every CRAG golden, and
+    # `expected_outcome_mismatches` can't catch that since it only ever looks
+    # at `rows` — a golden that never ran isn't in `rows` to be flagged as
+    # wrong. `unverified` makes that visible instead of silently vanishing.
+    unverified = [s for s in skipped if not s["reason"].startswith("intent=")]
+    if unverified:
         print(
-            f"WARNING: {len(error_skips)} golden(s) errored (not just skipped) and are "
-            "excluded from this run's pass/fail numbers:",
+            f"WARNING: {len(unverified)} golden(s) never actually ran this "
+            "profile (not the accepted sql/hybrid limitation) — this run does "
+            "NOT verify them:",
             file=sys.stderr,
         )
-        for s in error_skips:
+        for s in unverified:
             print(f"  - {s['id']}: {s['reason']}", file=sys.stderr)
 
     # Ragas needs real retrieved context to judge against. A row where retrieval
@@ -144,11 +158,7 @@ def main() -> None:
         row.setdefault("ragas_metrics", None)
 
     timestamp = datetime.datetime.now(datetime.UTC)
-    out_path = (
-        Path(args.output)
-        if args.output
-        else Path(f"eval/results/{timestamp:%Y%m%dT%H%M%SZ}_{args.profile}.json")
-    )
+    out_path = Path(args.output) if args.output else default_output_path(timestamp, args.profile)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     payload = {
@@ -159,6 +169,7 @@ def main() -> None:
         "mode": args.mode,
         "rows": rows,
         "skipped": skipped,
+        "unverified": unverified,
         "aggregate": aggregate(rows),
         "expected_outcome_mismatches": expected_outcome_mismatches(rows, args.profile),
     }
