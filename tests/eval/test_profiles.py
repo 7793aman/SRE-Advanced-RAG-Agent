@@ -56,3 +56,12 @@ def test_adaptive_retrieval_profile_isolates_only_that_flag() -> None:
     assert profile["enable_hyde"] is False
     assert profile["enable_crag"] is False
     assert profile["enable_self_reflective"] is False
+
+
+def test_self_reflective_profile_isolates_only_that_flag() -> None:
+    profile = PROFILES["self_reflective"]
+    assert profile["enable_self_reflective"] is True
+    assert profile["enable_rerank"] is False
+    assert profile["enable_hyde"] is False
+    assert profile["enable_crag"] is False
+    assert profile["enable_adaptive_retrieval"] is False

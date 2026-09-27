@@ -70,6 +70,19 @@ PROFILES: dict[str, dict] = {
         "enable_adaptive_retrieval": True,
         "top_k": 5,
     },
+    # Isolates the self-reflective critique/regenerate loop the same way — was
+    # missing before, which meant self_rag goldens could only ever be checked
+    # against "all" (where an unrelated adaptive_retrieval interaction can mask
+    # whether self-reflection itself is working).
+    "self_reflective": {
+        "search_mode": "hybrid",
+        "enable_rerank": False,
+        "enable_hyde": False,
+        "enable_crag": False,
+        "enable_self_reflective": True,
+        "enable_adaptive_retrieval": False,
+        "top_k": 5,
+    },
     "all": {
         "search_mode": "hybrid",
         "enable_rerank": True,

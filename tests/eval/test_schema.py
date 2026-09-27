@@ -91,8 +91,10 @@ def test_load_goldens_warns_but_does_not_fail_on_missing_feature_categories(
 
 
 def test_the_projects_real_golden_set_loads_cleanly() -> None:
+    # File order groups goldens by category, not strictly by id — q-039/q-040
+    # sit next to their technique's other goldens rather than in numeric order.
     real_path = Path(__file__).resolve().parents[2] / "eval" / "seed_questions.yaml"
     goldens = load_goldens(real_path)
-    assert len(goldens) == 42
+    assert len(goldens) == 37
     ids = [g.id for g in goldens]
-    assert ids == sorted(ids)
+    assert len(ids) == len(set(ids))

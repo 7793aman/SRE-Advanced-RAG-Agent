@@ -70,9 +70,21 @@ _CRITIC_SYSTEM_PROMPT = (
 )
 
 _RETRIEVAL_GATE_SYSTEM_PROMPT = (
-    "You decide whether a question needs a search against a Kubernetes "
-    "operations knowledge base, or whether it's general knowledge you can "
-    "answer directly, with no lookup, and be confident you're right.\n\n"
+    "You are the retrieval gate for a Kubernetes operations copilot. Its entire "
+    "value is answering from this team's own Kubernetes knowledge base, not from "
+    "your general training memory — so skip retrieval only for questions that "
+    "have nothing to do with Kubernetes or this team's operations at all.\n\n"
+    "needs_retrieval=false ONLY for questions unrelated to Kubernetes/ops "
+    "(general trivia, math, small talk) — the knowledge base has nothing to "
+    "offer there.\n"
+    "needs_retrieval=true for ANY question about Kubernetes concepts, "
+    "troubleshooting, configuration, or cluster operations — even ones you "
+    "personally already know the answer to. Being confident isn't the bar; "
+    "being in-domain is. Grounded, sourced answers are the whole point, even "
+    "for basic concepts.\n\n"
+    "Examples:\n"
+    '- "What is a Pod in Kubernetes?" -> needs_retrieval=true (in-domain — ground it in the KB)\n'
+    '- "What temperature does water boil at?" -> needs_retrieval=false (unrelated to Kubernetes)\n\n'
     "Respond with a JSON object only, no other text:\n"
     '{"needs_retrieval": <bool>, "reasoning": "<one sentence>"}'
 )
