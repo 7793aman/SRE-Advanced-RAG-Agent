@@ -588,7 +588,7 @@
   expected_with_feature: pass
   notes: "Wild-card: RBAC security question. (confirmed: real naive run, overlap 1.0 ✓)"
 
-# ==================== ADAPTIVE RETRIEVAL (2 goldens — this project's own feature, not in the reference tutorial) ====================
+# ==================== ADAPTIVE RETRIEVAL (3 goldens — this project's own feature, not in the reference tutorial) ====================
 # Uses `expected_route` (checked by eval.post_checks.route_check against
 # response.metadata.route), not source_overlap, as the pass/fail signal — retrieval
 # being skipped on purpose isn't a missing source, it's the point. See
@@ -621,3 +621,17 @@
   expected_with_feature: pass
   expected_route: rag
   notes: "The opposite direction from q-041: a genuine K8s question that needs real retrieval. This is the exact golden that caught the needs_retrieval() bug — before the prompt fix in app/services/reflection_service.py, this wrongly skipped retrieval (route=rag_general_knowledge, 0 chunks); after the fix, it correctly retrieves (route=rag). (confirmed: real naive=pass, dedicated adaptive_retrieval profile=pass post-fix ✓)."
+
+- id: q-043
+  question: "What is OOM?"
+  intent: rag
+  golden_sources:
+    - no_retrieval_expected
+  golden_answer_keywords:
+    - memory
+    - kill
+  demonstrates_feature: adaptive_retrieval
+  expected_baseline: fail
+  expected_with_feature: pass
+  expected_route: rag_general_knowledge
+  notes: "A third, harder case between q-041 (fully unrelated to Kubernetes) and q-042 (needs our docs): OOM is Kubernetes/ops-adjacent terminology, but its definition is universal and doesn't depend on our docs — the gate should still skip retrieval here. The first version of the needs_retrieval() prompt fix (the one that made ANY Kubernetes-related question retrieve) would have wrongly failed this golden; the corrected prompt distinguishes 'basic universal term' from 'needs our specifics' instead of just 'in-domain vs not'. (confirmed: real dedicated adaptive_retrieval profile=pass ✓)."

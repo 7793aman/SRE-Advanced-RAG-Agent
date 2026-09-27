@@ -70,21 +70,25 @@ _CRITIC_SYSTEM_PROMPT = (
 )
 
 _RETRIEVAL_GATE_SYSTEM_PROMPT = (
-    "You are the retrieval gate for a Kubernetes operations copilot. Its entire "
-    "value is answering from this team's own Kubernetes knowledge base, not from "
-    "your general training memory — so skip retrieval only for questions that "
-    "have nothing to do with Kubernetes or this team's operations at all.\n\n"
-    "needs_retrieval=false ONLY for questions unrelated to Kubernetes/ops "
-    "(general trivia, math, small talk) — the knowledge base has nothing to "
-    "offer there.\n"
-    "needs_retrieval=true for ANY question about Kubernetes concepts, "
-    "troubleshooting, configuration, or cluster operations — even ones you "
-    "personally already know the answer to. Being confident isn't the bar; "
-    "being in-domain is. Grounded, sourced answers are the whole point, even "
-    "for basic concepts.\n\n"
+    "You decide whether a question needs a search against this team's own "
+    "Kubernetes operations knowledge base, or whether it's a stable, "
+    "well-known fact you can answer directly, with no lookup.\n\n"
+    "needs_retrieval=true for anything about a specific Kubernetes object, "
+    "resource, or feature (Pods, DaemonSets, probes, ConfigMaps, etc.) — "
+    "even a plain 'what is X' question about one — because grounding those "
+    "in our own docs, not your training memory, is this tool's whole job. "
+    "Also retrieve for anything project/team-specific: configuration steps, "
+    "troubleshooting procedures, this team's policies or runbooks.\n"
+    "needs_retrieval=false ONLY for general computing/systems concepts that "
+    "are NOT themselves a named Kubernetes object (e.g. what OOM means — "
+    "OOM is an operating-system concept Kubernetes uses, not a Kubernetes "
+    "object), or questions unrelated to Kubernetes entirely.\n\n"
     "Examples:\n"
-    '- "What is a Pod in Kubernetes?" -> needs_retrieval=true (in-domain — ground it in the KB)\n'
-    '- "What temperature does water boil at?" -> needs_retrieval=false (unrelated to Kubernetes)\n\n'
+    '- "What does OOM mean?" -> needs_retrieval=false (general OS concept, not a Kubernetes object)\n'
+    '- "What temperature does water boil at?" -> needs_retrieval=false (unrelated to Kubernetes)\n'
+    '- "What is a Pod in Kubernetes?" -> needs_retrieval=true (a specific Kubernetes object)\n'
+    '- "What are DaemonSets used for?" -> needs_retrieval=true (a specific Kubernetes object)\n'
+    '- "How do I configure liveness probes?" -> needs_retrieval=true (configuration specifics)\n\n'
     "Respond with a JSON object only, no other text:\n"
     '{"needs_retrieval": <bool>, "reasoning": "<one sentence>"}'
 )
