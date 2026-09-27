@@ -198,9 +198,14 @@ def test_stage_noise_corpus_is_a_noop_with_no_staging_folder(tmp_path: Path) -> 
     assert stage_noise_corpus(root=tmp_path) == 0
 
 
-def test_real_signal_corpus_has_47_files() -> None:
-    """The staged `seed/docs/true_data/` is the 47-file signal set."""
+def test_real_signal_corpus_has_54_files() -> None:
+    """The staged `seed/docs/true_data/` is the 54-file signal set.
+
+    47 original + 7 added for ticket #33 (5 real kubernetes.io pages + 2 short
+    fictional internal SRE docs) so every golden's `golden_sources` resolves to a
+    real ingested file — see eval/seed_questions.yaml's header comment.
+    """
     signal = select_corpus(0).signal
     if not (DOCS_DIR / SIGNAL_SUBDIR).is_dir():
         pytest.skip("signal corpus not staged")
-    assert len(signal) == 47
+    assert len(signal) == 54

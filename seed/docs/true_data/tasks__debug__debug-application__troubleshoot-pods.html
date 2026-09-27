@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head><title>Troubleshoot Running Pods</title></head>
+<body>
+<h1>Troubleshoot Running Pods</h1>
+<p>Source: adapted from
+<a href="https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/">kubernetes.io — Debug Running Pods</a>
+and
+<a href="https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/">Assign Memory Resources to Containers and Pods</a>.</p>
+
+<h2>Start with kubectl describe and kubectl logs</h2>
+<p>When a Pod is misbehaving, start with <code>kubectl describe pod &lt;name&gt;</code>.
+The output shows the container state (Waiting, Running, or Terminated), the ready
+status, the restart count, and a list of recent events with timestamps and messages.
+Use <code>kubectl logs &lt;pod&gt;</code> (add <code>--previous</code> to see the logs
+of the last crashed instance) to see what the application itself printed before it
+died.</p>
+
+<h2>CrashLoopBackOff</h2>
+<p>If a container is exiting and being restarted very frequently, Kubernetes increases
+the delay before the next restart attempt exponentially — starting at 100ms and
+capping at 5 minutes. This exponential backoff is what shows up as the
+<code>CrashLoopBackOff</code> status: the container isn't dead, it's crashing,
+restarting, and being made to wait longer between each attempt. Check
+<code>kubectl logs --previous</code> for why the process is exiting, and
+<code>kubectl describe pod</code>'s events section for anything about failing
+probes, missing config, or an unrecoverable startup error.</p>
+
+<h2>OOMKilled</h2>
+<p>A container is not allowed to use more memory than its configured limit. If a
+container tries to allocate more memory than its limit, the kernel may terminate it.
+This shows up in <code>kubectl describe pod</code> as:</p>
+<pre><code>lastState:
+   terminated:
+     exitCode: 137
+     reason: OOMKilled</code></pre>
+<p>Exit code 137 plus <code>reason: OOMKilled</code> means the container ran out of
+memory and was killed by the kernel. If the container's restart policy allows it, the
+kubelet restarts it — and it can be OOMKilled again if the underlying memory usage
+doesn't change. The fix is to raise the container's <code>memory</code> limit, or
+reduce what the application actually needs to hold in memory.</p>
+
+<h2>ErrImagePull / ImagePullBackOff</h2>
+<p>This means the kubelet could not pull the container image. Common causes: a
+misspelled image name or tag, a tag that doesn't exist, or missing credentials for a
+private registry. Kubernetes pulls images using the name you give it in
+<code>spec.containers[].image</code> — always include the registry hostname for a
+private registry (e.g. <code>my-registry.example/my-image:1.2</code>) and a specific
+tag rather than relying on <code>:latest</code>. For a private registry, attach
+credentials to the Pod with <code>imagePullSecrets</code>, or configure the node to
+authenticate to the registry directly. <code>kubectl describe pod</code>'s events
+section shows the exact pull error returned by the registry, which usually tells you
+whether it's a naming problem or an auth problem.</p>
+</body>
+</html>

@@ -5,7 +5,7 @@ retrieval technique has to earn its place by rescuing signal from noise.
 
 | Directory | What | Committed? |
 |-----------|------|------------|
-| `true_data/` | 47 real Kubernetes documentation files (concepts, tasks, tutorials, API reference). **Signal** — always ingested in full. | Yes |
+| `true_data/` | 52 real Kubernetes documentation files (concepts, tasks, tutorials, API reference) plus 2 short fictional internal SRE docs (incident runbook, on-call escalation policy — added for ticket #33's `hybrid_rag_sql` eval goldens). 54 files total. **Signal** — always ingested in full. | Yes |
 | `noisy_data/` | ~820 unrelated technical PDFs (papers on hashing, networking, databases, …). **Noise** — sampled by `--noise-sample`. | Bodies gitignored; only `.gitkeep` is tracked |
 
 ## Corpus wiring
@@ -21,8 +21,8 @@ root is picked up with no manual step.
 
 ```bash
 uv run python scripts/seed_db.py --no-ingest          # DB only
-uv run python scripts/seed_db.py --noise-sample 150   # 47 signal + 150 noise (default)
-uv run python scripts/seed_db.py --noise-sample all   # 47 signal + every noise file
+uv run python scripts/seed_db.py --noise-sample 150   # 54 signal + 150 noise (default)
+uv run python scripts/seed_db.py --noise-sample all   # 54 signal + every noise file
 ```
 
 Noise sampling uses a fixed seed, so `--noise-sample N` always picks the same N

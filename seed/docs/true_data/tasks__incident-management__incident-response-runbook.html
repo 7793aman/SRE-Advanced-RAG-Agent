@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head><title>Incident Response Runbook</title></head>
+<body>
+<h1>Incident Response Runbook</h1>
+<p><em>Internal SRE process document — not a Kubernetes upstream doc. Written for this
+project's fictional operations team, to match the <code>incidents</code>,
+<code>alerts</code>, and <code>oncall_logs</code> tables seeded for the Text2SQL demo.</em></p>
+
+<h2>Severity levels</h2>
+<ul>
+<li><strong>P1 — Critical.</strong> Full or major service outage affecting production.
+Page on-call immediately; target response within 15 minutes.</li>
+<li><strong>P2 — High.</strong> Significant degradation, no full outage. Page on-call;
+target response within 1 hour.</li>
+<li><strong>P3 — Moderate.</strong> Limited impact, workaround available. Handle during
+business hours; target response within 1 business day.</li>
+<li><strong>P4 — Low.</strong> Cosmetic or informational. No paging; track in the
+backlog.</li>
+</ul>
+
+<h2>Standard remediation procedure</h2>
+<ol>
+<li><strong>Acknowledge</strong> the page and open an incident record (this becomes a
+row in the <code>incidents</code> table, with a start time and severity).</li>
+<li><strong>Triage</strong> — check which cluster and workload the alerting pods
+belong to; run <code>kubectl describe</code> / <code>kubectl logs</code> on the
+affected pods to establish a working theory.</li>
+<li><strong>Mitigate first, root-cause later</strong> — for a P1/P2, prefer a fast
+mitigation (rollback the deployment, scale up replicas, fail over to another cluster)
+over a full fix. Restoring service comes before understanding why it broke.</li>
+<li><strong>Resolve</strong> — once the mitigation is confirmed working, mark the
+incident resolved. This sets <code>resolved_at</code> and, together with
+<code>started_at</code>, determines the incident's MTTR
+(<code>mttr_minutes</code>).</li>
+<li><strong>Write the RCA</strong> — every P1 and P2 gets a short root-cause summary
+(<code>rca_summary</code>) within 2 business days: what broke, why, and what will
+prevent recurrence.</li>
+</ol>
+
+<h2>Reducing MTTR</h2>
+<p>The biggest lever on mean-time-to-resolution is fast, confident mitigation: rollback
+and scale-up should be one-command operations, and every production cluster should
+have a known-good previous deployment to roll back to. Alerts should link directly to
+the runbook page for that alert category so the on-call engineer doesn't have to guess
+at the first step.</p>
+</body>
+</html>

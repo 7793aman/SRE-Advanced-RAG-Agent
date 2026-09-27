@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head><title>Pod Lifecycle</title></head>
+<body>
+<h1>Pod Lifecycle</h1>
+<p>Source: adapted from
+<a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/">kubernetes.io — Pod Lifecycle</a>.</p>
+
+<h2>Pod phases</h2>
+<p>A Pod's <code>status.phase</code> is a simple, high-level summary of where it is in
+its lifecycle — not a full state machine.</p>
+<ul>
+<li><strong>Pending</strong> — accepted by the cluster, but one or more containers
+aren't set up and ready yet (includes time spent waiting to be scheduled and time
+spent pulling images).</li>
+<li><strong>Running</strong> — bound to a node, all containers created, and at least
+one container is running, starting, or restarting.</li>
+<li><strong>Succeeded</strong> — all containers terminated successfully and will not
+restart.</li>
+<li><strong>Failed</strong> — all containers terminated and at least one exited with a
+failure.</li>
+<li><strong>Unknown</strong> — the Pod's state couldn't be obtained, usually a
+communication error with the node.</li>
+</ul>
+
+<h2>Container states</h2>
+<p>Within a Pod, each container is independently in one of three states:</p>
+<ul>
+<li><strong>Waiting</strong> — the container is doing setup work, such as pulling its
+image; <code>kubectl describe pod</code> shows a Reason for why.</li>
+<li><strong>Running</strong> — executing without issues.</li>
+<li><strong>Terminated</strong> — started, then either completed or failed;
+<code>kubectl describe pod</code> shows a reason, exit code, and start/finish time.</li>
+</ul>
+
+<h2>Restart policy</h2>
+<p><code>restartPolicy</code> applies to every container in the Pod. Values:
+<code>Always</code> (default — restart on exit), <code>OnFailure</code> (restart only
+on non-zero exit), <code>Never</code>. If containers keep exiting and restarting very
+frequently, the delay before the next restart increases exponentially — 100ms up to a
+5-minute cap — which is what produces the <code>CrashLoopBackOff</code> status.</p>
+
+<h2>Probes</h2>
+<p>The kubelet runs three kinds of probes: <strong>startup</strong> (delays the other
+two probes until the app has finished starting), <strong>liveness</strong> (restarts
+the container if it's stuck/deadlocked), and <strong>readiness</strong> (controls
+whether the Pod receives traffic — a Pod is only "ready" when all its containers pass
+their readiness probe, and Services stop routing to it otherwise).</p>
+
+<h2>Termination</h2>
+<p>By default a Pod gets a 30-second grace period on delete: a <code>TERM</code> signal
+is sent first, and if the process hasn't exited by the end of the grace period, a
+<code>KILL</code> signal follows.</p>
+</body>
+</html>
