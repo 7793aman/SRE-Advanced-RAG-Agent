@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head><title>Horizontal Pod Autoscaling</title></head>
+<body>
+<h1>Horizontal Pod Autoscaling</h1>
+<p>Source: adapted from
+<a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/">kubernetes.io — Horizontal Pod Autoscaling</a>.</p>
+
+<h2>What it does</h2>
+<p>A <strong>HorizontalPodAutoscaler (HPA)</strong> automatically adjusts the number of
+replicas of a Deployment or StatefulSet to match demand. This is <em>horizontal</em>
+scaling — deploying more Pods — as opposed to <em>vertical</em> scaling, which would
+mean giving the existing Pods more CPU/memory. HPA doesn't apply to resources that
+can't be scaled, such as a DaemonSet.</p>
+
+<h2>How the control loop works</h2>
+<p>The HPA controller runs periodically (every 15 seconds by default), not
+continuously. Each cycle it:</p>
+<ol>
+<li>Reads the current metric value (e.g. average CPU utilization) for the Pods it targets.</li>
+<li>Compares it against the target value configured on the HorizontalPodAutoscaler.</li>
+<li>Computes a new desired replica count from the ratio between current and desired
+metric value: <code>desiredReplicas = ceil(currentReplicas × currentMetric / desiredMetric)</code>.
+For example, if current CPU is 200m and the target is 100m, replicas double.</li>
+<li>Updates the target resource's replica count accordingly (scales up if load is high,
+scales back down — never below the configured minimum — if load drops).</li>
+</ol>
+
+<h2>Metric sources</h2>
+<p>HPA can scale on per-Pod resource metrics (CPU, memory — from the Metrics Server),
+custom metrics, or external metrics. If a container in the Pod doesn't have a resource
+request set for the metric being used, that Pod's utilization is undefined and the
+autoscaler won't act on it — this is why HPA on CPU requires a CPU request to be set.</p>
+</body>
+</html>

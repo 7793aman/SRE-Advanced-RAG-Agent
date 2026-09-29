@@ -75,8 +75,18 @@ dev = [
     "types-requests>=2.32.0",
 ]
 # Declared + pinned now; installed by their own slices to keep `--extra dev` lean.
-# eval harness — ticket #33 pins the exact ragas/langchain combination it needs.
-eval = ["ragas>=0.2.0"]
+# eval harness — ticket #33. Exact pins, not ranges: ragas>=0.2.0 alone resolves to
+# ragas 0.3.x, which unconditionally imports `langchain_community.chat_models.vertexai`
+# at package-import time — a submodule that no longer exists in current
+# langchain-community releases (it's being sunset in favor of standalone provider
+# packages), so `import ragas` crashes before any of our code runs. ragas==0.2.15 +
+# langchain-community==0.3.27 is the newest combination confirmed to import cleanly.
+eval = [
+    "ragas==0.2.15",
+    "langchain-community==0.3.27",
+    "langchain-openai>=0.2.0",
+    "datasets>=3.0.0",
+]
 # demo UI — ticket #34.
 ui = ["streamlit>=1.40.0", "requests>=2.32.0"]
 

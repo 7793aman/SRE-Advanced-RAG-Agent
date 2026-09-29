@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head><title>Resource Management for Pods and Containers</title></head>
+<body>
+<h1>Resource Management for Pods and Containers</h1>
+<p>Source: adapted from
+<a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">kubernetes.io — Resource Management for Pods and Containers</a>.</p>
+
+<h2>Requests vs. limits</h2>
+<p>A <strong>request</strong> is what the scheduler uses to decide which node can fit
+the Pod — the kubelet reserves at least that much for the container. A
+<strong>limit</strong> is the ceiling the kubelet (and ultimately the kernel) enforces:
+the container is not allowed to use more.</p>
+
+<h2>How each resource is enforced</h2>
+<p><strong>CPU limits</strong> are enforced by throttling — the kernel restricts CPU
+access once a container approaches its limit; a container simply cannot use more CPU
+than its limit allows.</p>
+<p><strong>Memory limits</strong> are enforced reactively, by the kernel's out-of-memory
+killer. A container can briefly use more memory than its limit; if the kernel detects
+memory pressure, it may terminate ("OOM kill") the container. This is why a container
+can run fine for a while and then suddenly get <code>OOMKilled</code> once memory
+pressure hits.</p>
+
+<h2>Resource types</h2>
+<table><tr><th>Type</th><th>Meaning</th><th>Unit</th></tr>
+<tr><td><code>cpu</code></td><td>Compute processing</td><td>cores</td></tr>
+<tr><td><code>memory</code></td><td>RAM</td><td>bytes</td></tr>
+<tr><td><code>ephemeral-storage</code></td><td>Local scratch disk</td><td>bytes</td></tr>
+</table>
+
+<h2>Quality of Service (QoS) classes</h2>
+<p>Kubernetes assigns every Pod a QoS class based on its requests/limits, and uses it to
+decide eviction order under node memory pressure:</p>
+<ul>
+<li><strong>Guaranteed</strong> — every container has both a memory and CPU limit, and
+the request equals the limit for each. Evicted last.</li>
+<li><strong>Burstable</strong> — at least one container has a request, but the Pod
+doesn't qualify for Guaranteed. Evicted after BestEffort, before Guaranteed.</li>
+<li><strong>BestEffort</strong> — no requests or limits set at all. Evicted first under
+memory pressure.</li>
+</ul>
+<p>A critical workload that needs its compute reserved and wants to survive node
+pressure should be given matching requests and limits — i.e. the Guaranteed class.</p>
+</body>
+</html>

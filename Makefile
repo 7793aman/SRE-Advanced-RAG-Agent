@@ -11,7 +11,7 @@ help:
 	@echo "  make test        — run pytest"
 	@echo "  make lint        — ruff check"
 	@echo "  make format      — ruff format"
-	@echo "  make typecheck   — mypy app"
+	@echo "  make typecheck   — mypy app eval"
 	@echo "  make check       — lint + typecheck + test"
 	@echo ""
 	@echo "  make migrate     — apply seed/migrations/*.sql to the database"
@@ -43,7 +43,7 @@ format:
 	uv run ruff format .
 
 typecheck:
-	uv run mypy app
+	uv run mypy app eval
 
 check: lint typecheck test
 

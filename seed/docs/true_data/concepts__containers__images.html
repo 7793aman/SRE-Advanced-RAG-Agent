@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head><title>Images</title></head>
+<body>
+<h1>Images</h1>
+<p>Source: adapted from
+<a href="https://kubernetes.io/docs/concepts/containers/images/">kubernetes.io — Images</a>.</p>
+
+<h2>Image pull policy</h2>
+<p><code>imagePullPolicy</code> controls when the kubelet pulls a container's image:</p>
+<ul>
+<li><code>IfNotPresent</code> — pull only if the image isn't already present on the node.</li>
+<li><code>Always</code> — always pull the image, even if a copy already exists locally.</li>
+<li><code>Never</code> — never pull; the image must already exist on the node.</li>
+</ul>
+
+<h2>Naming images correctly</h2>
+<p>For a private registry, include the registry hostname in the image name, e.g.
+<code>my-registry.example/my-image:1.2</code>. Always specify a tag or digest — relying
+on <code>:latest</code> in production makes it unclear which version is actually
+running, and makes pull failures harder to diagnose.</p>
+
+<h2>Private registry authentication</h2>
+<p>To pull from a private registry, a Pod needs credentials. The usual approaches are:
+attaching an <code>imagePullSecrets</code> entry to the Pod spec, configuring the node
+itself to authenticate to the registry, or using a kubelet credential provider that
+supplies short-lived credentials automatically. A Secret holding registry credentials
+is typically created with <code>kubectl create secret docker-registry</code>.</p>
+
+<h2>ErrImagePull / ImagePullBackOff</h2>
+<p>If the kubelet can't pull an image, the Pod shows <code>ErrImagePull</code> and then
+backs off into <code>ImagePullBackOff</code>. The most common causes are: a misspelled
+image name, a tag that doesn't exist in the registry, or missing/incorrect
+credentials for a private registry. <code>kubectl describe pod</code> shows the exact
+error message returned by the registry in its events section.</p>
+</body>
+</html>
