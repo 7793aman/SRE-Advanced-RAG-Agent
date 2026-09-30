@@ -19,6 +19,7 @@ from typing import Any
 
 from app.models import ChatResponse, RetrievedChunk
 from eval.invokers import ServiceInvoker, SkippedIntent
+from eval.langfuse_link import invoke_traced, push_results
 from eval.post_checks import (
     forbidden_keywords_check,
     route_check,
@@ -69,14 +70,16 @@ def run_eval(goldens: list[Golden], flags: dict, invoker: Any) -> tuple[list[dic
     skipped: list[dict] = []
     for g in goldens:
         try:
-            resp, chunks = invoker.invoke(g.question, flags, g.intent)
+            (resp, chunks), trace_id = invoke_traced(invoker, g.question, flags, g.intent)
         except SkippedIntent as e:
             skipped.append({"id": g.id, "reason": str(e)})
             continue
         except Exception as e:  # noqa: BLE001 — one bad golden must not kill the run
             skipped.append({"id": g.id, "reason": f"error: {e}"})
             continue
-        rows.append(build_row(g, resp, chunks))
+        row = build_row(g, resp, chunks)
+        row["trace_id"] = trace_id  # None while Langfuse is off
+        rows.append(row)
     return rows, skipped
 
 
@@ -158,6 +161,8 @@ def main() -> None:
         row.setdefault("ragas_metrics", None)
 
     timestamp = datetime.datetime.now(datetime.UTC)
+    if push_results(rows, args.profile, f"{timestamp:%Y%m%dT%H%M%SZ}"):
+        print("Pushed scores and traces to Langfuse dataset 'rag-golden-set'.")
     out_path = Path(args.output) if args.output else default_output_path(timestamp, args.profile)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 

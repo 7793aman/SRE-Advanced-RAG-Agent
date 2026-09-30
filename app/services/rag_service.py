@@ -72,9 +72,11 @@ from app.services.llm_service import LLMResponse, generate_text
 from app.services.query_cache_service import query_cache
 from app.services.reflection_service import needs_retrieval, reflect, should_regenerate
 from app.services.reranker_service import rerank
+from app.services.tracing import observe, update_trace
 from app.services.vector_store import hybrid_search, search, sparse_search
 
 _CHUNK_PREVIEW_CHARS = 200
+_TRACE_CHUNK_CHARS = 1_000
 
 
 def _build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
@@ -153,6 +155,7 @@ def _retrieve_and_generate(
     return chunks, llm_response, used_web_fallback, retrieval_path
 
 
+@observe(name="rag.run_rag_with_trace")
 def run_rag_with_trace(
     question: str, flags: dict[str, Any]
 ) -> tuple[ChatResponse, list[RetrievedChunk]]:
@@ -228,12 +231,28 @@ def run_rag_with_trace(
             retrieval_path=retrieval_path,
         ),
     )
+    update_trace(
+        metadata={
+            "flags": flags,
+            "route": route,
+            "retrieval_path": retrieval_path,
+            "used_web_fallback": used_web_fallback,
+            "reflection_iterations": reflection_iterations,
+            "reflection_score": reflection_score,
+            "chunks": [
+                {"source": c.source, "score": c.score, "text": c.text[:_TRACE_CHUNK_CHARS]}
+                for c in chunks
+            ],
+        }
+    )
     return response, chunks
 
 
+@observe(name="rag.run_rag")
 def run_rag(question: str, flags: dict[str, Any]) -> ChatResponse:
     """The cached entry point `/query` calls: cache read, else run + write."""
     cached = query_cache.get_rag_answer(question, flags)
+    update_trace(metadata={"flags": flags, "cache_hit": cached is not None})
     if cached is not None:
         response = ChatResponse.model_validate(cached)
         response.cache_hit = True

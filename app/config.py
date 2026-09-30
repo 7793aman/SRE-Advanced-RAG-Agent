@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     self_reflective_enabled_by_default: bool = False
     adaptive_retrieval_enabled_by_default: bool = False
 
+    # === Observability (Langfuse; tracing is off while the keys are blank) ===
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_host: str = ""  # e.g. https://us.cloud.langfuse.com; blank = SDK default (EU cloud)
+    langfuse_base_url: str = ""  # newer name for the same thing; either one works
+
     # === Logging ===
     log_json: bool = False
     log_level: str = "INFO"

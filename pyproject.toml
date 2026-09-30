@@ -60,6 +60,9 @@ dependencies = [
     # Doc-dedup storage backend
     "boto3>=1.35.0",
 
+    # Observability (tracing + eval linkage)
+    "langfuse>=4.0.0",
+
     # Eval goldens parsing
     "pyyaml>=6.0",
 ]

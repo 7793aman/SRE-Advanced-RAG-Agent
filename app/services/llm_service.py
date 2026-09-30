@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.services.lazy_singleton import LazySingleton
+from app.services.tracing import observe, update_generation
 
 
 class LLMResponse(BaseModel):
@@ -39,17 +40,32 @@ def _messages(prompt: str, system_prompt: str | None) -> list[ChatCompletionMess
     return messages
 
 
-def _to_response(completion: ChatCompletion) -> LLMResponse:
+def _to_response(
+    completion: ChatCompletion, model: str, messages: list[ChatCompletionMessageParam]
+) -> LLMResponse:
     text = completion.choices[0].message.content or ""
     usage = completion.usage
-    return LLMResponse(
+    response = LLMResponse(
         text=text,
         prompt_tokens=usage.prompt_tokens if usage else 0,
         completion_tokens=usage.completion_tokens if usage else 0,
         total_tokens=usage.total_tokens if usage else 0,
     )
+    # Langfuse prices the call from the model name and these token counts.
+    update_generation(
+        model=model,
+        usage={
+            "input": response.prompt_tokens,
+            "output": response.completion_tokens,
+            "total": response.total_tokens,
+        },
+        input=messages,
+        output=text,
+    )
+    return response
 
 
+@observe(name="llm.generate_text", as_type="generation")
 def generate_text(
     prompt: str,
     system_prompt: str | None = None,
@@ -69,9 +85,10 @@ def generate_text(
         completion = _get_client().chat.completions.create(
             model=model_name, messages=messages, temperature=temperature
         )
-    return _to_response(completion)
+    return _to_response(completion, model_name, messages)
 
 
+@observe(name="llm.generate_json", as_type="generation")
 def generate_json(
     prompt: str,
     system_prompt: str | None = None,
@@ -91,4 +108,4 @@ def generate_json(
             response_format={"type": "json_object"},
             temperature=temperature,
         )
-    return _to_response(completion)
+    return _to_response(completion, model_name, messages)
