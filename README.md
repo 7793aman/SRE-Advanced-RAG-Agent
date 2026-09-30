@@ -337,7 +337,7 @@ flowchart LR
         T32[#32 9-layer security] --> T33[#33 Ragas eval harness]
         T32 --> T34[#34 Streamlit UI]
         T33 --> T37[#37 Langfuse tracing]
-        T33 --> T35[#35 Docker e2e + docs + notebooks]
+        T33 --> T35[#35 Docker e2e + docs]
         T34 --> T35
     end
     T31 --> T32
@@ -348,7 +348,7 @@ flowchart LR
 | #32 | L2, L5, L6, L7a/b, L9 + fixed-order wiring |
 | #33 | Golden set, flag profiles, Ragas adapter, post-checks, reporting |
 | #34 | Streamlit UI: auth, all flag toggles, SQL approve/reject, eval dashboard |
-| #35 | `docker compose up` end to end, final docs, notebooks |
+| #35 | `docker compose up` end to end, final docs |
 | #37 | Langfuse tracing + eval linkage |
 
 ---

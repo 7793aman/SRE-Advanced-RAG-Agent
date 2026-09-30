@@ -138,6 +138,7 @@ def clean_users(db_ready: None) -> Iterator[None]:
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    monkeypatch.setattr(settings, "warmup_on_startup", False)
     with TestClient(app) as test_client:
         yield test_client

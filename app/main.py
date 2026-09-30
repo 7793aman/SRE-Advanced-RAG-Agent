@@ -5,15 +5,25 @@
 module-level `app` is what `uvicorn app.main:app` and `scripts/serve.py` serve.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.query import router as query_router
+from app.warmup import start_warmup
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    start_warmup()
+    yield
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Enterprise RAG", version="0.1.0")
+    app = FastAPI(title="Enterprise RAG", version="0.1.0", lifespan=lifespan)
 
     @app.get("/", tags=["meta"])
     def root() -> dict[str, str]:

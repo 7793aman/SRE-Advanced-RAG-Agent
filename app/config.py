@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     log_json: bool = False
     log_level: str = "INFO"
 
+    # === Startup ===
+    # Load the slow lazy pieces (guard models, keyword index, reranker, graph) in a
+    # background thread at startup so the first question isn't the slow one.
+    warmup_on_startup: bool = True
+
     # === Demo UI (issue #34) ===
     # Only read by scripts/streamlit_app.py, which talks to the API over HTTP
     # like any other client rather than importing FastAPI internals directly.

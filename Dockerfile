@@ -17,7 +17,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
 COPY pyproject.toml ./
 RUN uv pip install --system --no-cache --index-url https://download.pytorch.org/whl/cpu \
         torch torchvision
-RUN uv pip install --system --no-cache -r pyproject.toml
+RUN uv pip install --system --no-cache -r pyproject.toml --extra ui
 
 COPY app/ ./app/
 COPY scripts/ ./scripts/
@@ -27,4 +27,3 @@ EXPOSE 8000
 
 CMD ["python", "scripts/serve.py"]
 
-# NOTE: full image build + compose wiring is finalised in ticket #35.

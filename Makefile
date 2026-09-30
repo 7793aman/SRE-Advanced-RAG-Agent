@@ -22,10 +22,10 @@ help:
 install:
 	uv python pin 3.12
 	uv venv --python 3.12
-	uv sync --extra dev
+	uv sync --extra dev --extra eval --extra ui
 
 sync:
-	uv sync --extra dev
+	uv sync --extra dev --extra eval --extra ui
 
 api:
 	uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
