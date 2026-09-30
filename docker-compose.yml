@@ -49,6 +49,21 @@ services:
       - ./scripts:/app/scripts
       - ./seed:/app/seed
 
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["streamlit", "run", "scripts/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      - STREAMLIT_API_BASE_URL=http://app:8000
+    depends_on:
+      - app
+    volumes:
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+
 volumes:
   postgres_data:
   qdrant_data:

@@ -477,55 +477,7 @@ def render_response(index: int, entry: dict[str, Any]) -> None:
     # Scoped to this one message — an `st.expander` per answer, not a shared
     # panel — so there's never a question of whose detail is on screen.
     with st.expander("Inspect response"):
-        formatted_tab, raw_tab = st.tabs(["Formatted", "Raw JSON"])
-        with formatted_tab:
-            # Every field `response` actually carries, in the same order and
-            # under the same key names Raw JSON uses — nothing curated out,
-            # nothing added — so this is genuinely the same data laid out
-            # readably, not a different, smaller view of it. (`pending_sql`
-            # isn't shown here: this code path only runs once it's already
-            # null — see the early return above for the pending-approval
-            # case, which has its own render function.)
-            st.markdown("**answer**")
-            st.write(response["answer"] if response["answer"] else "*(empty)*")
-
-            st.markdown("**sources**")
-            if response["sources"]:
-                for source in response["sources"]:
-                    st.write(f"- {source}")
-            else:
-                st.caption("(none)")
-
-            st.write(f"**retrieval_score:** {response['retrieval_score']:.2f}")
-            st.write(f"**cache_hit:** {response['cache_hit']}")
-
-            st.markdown("**metadata**")
-            st.write(f"- **route:** {metadata['route']}")
-            st.write(f"- **cache_hit:** {metadata['cache_hit']}")
-            st.write(f"- **used_web_fallback:** {metadata.get('used_web_fallback', False)}")
-            st.write(f"- **retrieval_path:** {metadata.get('retrieval_path') or 'null'}")
-            st.write(f"- **reflection_iterations:** {metadata['reflection_iterations']}")
-            reflection_score = metadata.get("reflection_score")
-            st.write(
-                "- **reflection_score:** "
-                + (f"{reflection_score:.2f}" if reflection_score is not None else "null")
-            )
-            st.write(f"- **refined_question:** {metadata.get('refined_question') or 'null'}")
-
-            st.write("- **retrieved_chunks:**")
-            chunks = metadata.get("retrieved_chunks", [])
-            if not chunks:
-                st.caption("  (none)")
-            for i, chunk in enumerate(chunks, start=1):
-                st.write(f"  **[{i}] {chunk['source']} — score {chunk['score']:.2f}**")
-                # Retrieved chunk text is arbitrary corpus content, not
-                # markdown we wrote — st.caption/st.write would parse a
-                # stray "#" as a heading. st.text renders it literally, in
-                # full — the same (server-truncated) string Raw JSON shows,
-                # never re-truncated again on top of that by this display.
-                st.text(chunk["text"])
-        with raw_tab:
-            st.json(response)
+        st.json(response)
 
 
 # --- transcript + composer -----------------------------------------------------
