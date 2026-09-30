@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.query import router as query_router
+from app.services.tracing import flush as flush_traces
 from app.warmup import start_warmup
 
 
@@ -20,6 +21,7 @@ from app.warmup import start_warmup
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     start_warmup()
     yield
+    flush_traces()  # send any buffered traces; a no-op while Langfuse is unset
 
 
 def create_app() -> FastAPI:

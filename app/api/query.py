@@ -59,6 +59,7 @@ from app.security.output_validator import validate_output
 from app.security.pii_redaction import redact_pii
 from app.security.token_budget import token_budget
 from app.services.graph import get_graph
+from app.services.tracing import callbacks
 
 router = APIRouter(tags=["query"])
 
@@ -108,7 +109,7 @@ def query(body: QueryRequest, user: AuthenticatedUser = Depends(get_current_user
 
     result = get_graph().invoke(  # L3 + L8 run inside the graph
         {"question": question, "flags": _flags(body), "user_id": user.id},
-        {"configurable": {"thread_id": str(uuid4())}},
+        {"configurable": {"thread_id": str(uuid4())}, "callbacks": callbacks()},
     )
     raw_response = _to_chat_response(result)
 
@@ -131,7 +132,10 @@ def execute_sql_query(
     body: SQLExecuteRequest, user: AuthenticatedUser = Depends(get_current_user)
 ) -> ChatResponse:
     graph = get_graph()
-    config: RunnableConfig = {"configurable": {"thread_id": body.query_id}}
+    config: RunnableConfig = {
+        "configurable": {"thread_id": body.query_id},
+        "callbacks": callbacks(),
+    }
 
     snapshot = graph.get_state(config)
     is_paused = snapshot.next == ("request_sql_approval",)

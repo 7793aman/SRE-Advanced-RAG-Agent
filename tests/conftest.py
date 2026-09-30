@@ -17,6 +17,17 @@ from dotenv import dotenv_values
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
+# A real `.env` carries live Langfuse keys; the suite must never send traces.
+# Env vars beat `.env` in pydantic-settings, and this runs before `app.config`
+# is imported. Tests that want tracing on monkeypatch `settings` themselves.
+for _key in (
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_HOST",
+    "LANGFUSE_BASE_URL",
+):
+    os.environ[_key] = ""
+
 
 def _point_tests_at_a_separate_database() -> None:
     """`clean_users` truncates `users` on every run — against the same
